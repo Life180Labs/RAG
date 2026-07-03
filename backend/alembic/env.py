@@ -6,10 +6,18 @@ from sqlalchemy.ext.asyncio import create_async_engine
 
 from alembic import context
 from app.core.config import get_settings
-from app.models.base import Base
 
 # Import all model modules here so Base.metadata is fully populated for autogenerate.
-from app.models import audit_log, session, user  # noqa: F401
+from app.models import (  # noqa: F401
+    audit_log,
+    invitation,
+    organization,
+    project,
+    session,
+    user,
+    workspace,
+)
+from app.models.base import Base
 
 config = context.config
 

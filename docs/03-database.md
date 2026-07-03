@@ -86,10 +86,42 @@ PostgreSQL (docs/06-rule.md Database Rules).
 
 # 6. Multi Tenancy Strategy
 
-**Pending — Phase 2 (Organization/Workspace/Project).** Every tenant-scoped table will carry
-`organization_id` (and `workspace_id`/`project_id` where applicable) and every repository query
-will filter on it, per docs/02-architecture.md section 122. No cross-tenant query is permitted
-without an explicit filter.
+Implemented (migration `0003_add_tenancy_tables`, models `backend/app/models/organization.py`,
+`workspace.py`, `project.py`). The hierarchy is Organization → Workspace → Project, each carrying
+its parent's ID (`workspace.organization_id`, `project.workspace_id`) and enforcing it via a
+composite unique slug constraint (`uq_workspace_org_slug`, `uq_project_workspace_slug`) so slugs
+only need to be unique within their parent, not globally.
+
+```
+organizations
+      │
+      ├── organization_members  (role: owner | admin | developer | viewer)
+      │
+      └── workspaces
+                │
+                ├── workspace_members  (role: owner | admin | developer | viewer)
+                │
+                └── projects
+                          │
+                          └── project_members  (role: owner | admin | developer | viewer)
+```
+
+**Deliberate MVP simplification — explicit membership, no role inheritance.** Every
+`require_*_role` dependency (`backend/app/api/tenancy_deps.py`) checks a membership row at
+*that exact level*; an organization ADMIN/OWNER does **not** automatically gain access to every
+workspace or project under their organization. Creating a workspace requires an organization
+role (ADMIN+), but managing it afterward requires a `workspace_members` row — auto-granted OWNER
+to whoever created it. The same pattern repeats one level down for projects. This keeps the
+access-control model simple and auditable (one row = one grant) at the cost of requiring
+explicit re-invitation into child resources; revisit with role inheritance if that friction
+proves real once more phases land.
+
+`role_meets_minimum()` (`backend/app/models/membership.py`) ranks roles
+`viewer < developer < admin < owner` for every `require_*_role(minimum)` check.
+
+Organization invitations (`invitations` table) are the only cross-cutting mechanism: accepting
+one creates an `organization_members` row directly — there is no separate workspace/project
+invitation flow yet.
 
 ---
 
@@ -135,11 +167,37 @@ implemented starting with the phases that introduce those entities.
 
 # 11. Repository Schema
 
-**Pending — Phase 3.**
+**Pending — Phase 3.** (Note: this is the "Repository" resource — a container for documents —
+distinct from the `app/repositories/` data-access layer, which already exists for every table.)
 
 # 12. Project Schema
 
-**Pending — Phase 2.**
+Implemented in `backend/app/models/project.py`, migration `0003_add_tenancy_tables`.
+
+```
+projects
+  id                      UUID PK
+  workspace_id            UUID FK -> workspaces.id, ON DELETE CASCADE, indexed
+  name                    varchar(255)
+  slug                    varchar(255)            -- unique within workspace (uq_project_workspace_slug)
+  status                  enum(active, archived)
+  owner_id                UUID FK -> users.id, ON DELETE SET NULL, nullable
+  created_at / updated_at timestamptz
+  deleted_at              timestamptz, nullable
+  created_by / updated_by UUID, nullable
+
+project_members
+  id           UUID PK
+  project_id   UUID FK -> projects.id, ON DELETE CASCADE, indexed
+  user_id      UUID FK -> users.id, ON DELETE CASCADE, indexed
+  role         enum(owner, admin, developer, viewer)
+  created_at / updated_at timestamptz
+  UNIQUE(project_id, user_id)  -- uq_project_member
+```
+
+Creating a project auto-creates a `project_members` row with `role = owner` for the creator (see
+docs/03-database.md section 6 for why this — not org/workspace role inheritance — is what grants
+access).
 
 # 13. User Schema
 
@@ -152,8 +210,9 @@ users
   email                   varchar(320) UNIQUE, indexed
   hashed_password         varchar(255)          -- argon2 (passlib)
   full_name               varchar(255)
-  role                    enum(admin, developer, researcher, viewer) -- global for Phase 1;
-                                                                       -- becomes per-tenant in Phase 2
+  role                    enum(admin, developer, researcher, viewer) -- platform-wide role,
+                                                                       -- distinct from per-tenant
+                                                                       -- MemberRole (section 6)
   is_active               boolean
   failed_login_attempts   int
   locked_until            timestamptz, nullable  -- account lockout (5 failures -> 15 min)
@@ -162,13 +221,40 @@ users
   deleted_at              timestamptz, nullable  -- soft delete
 ```
 
-New accounts default to `role = viewer`. Organization/workspace/project-scoped roles are added in
-Phase 2 without breaking this table (a global role remains a sane default for users outside any
-organization context).
+New accounts default to `role = viewer`. This platform-wide `UserRole` (`user_role` enum) was
+kept separate from the tenant-scoped `MemberRole` (`member_role` enum — owner/admin/developer/
+viewer, section 6) introduced in Phase 2 rather than merged: a user's standing at the platform
+level (e.g., can they use admin-only future endpoints at all) is a different concern from their
+role within a specific organization/workspace/project, and conflating them would force every
+tenant-scoped permission check to also reason about platform role.
 
 # 14. Workspace Schema
 
-**Pending — Phase 2.**
+Implemented in `backend/app/models/workspace.py`, migration `0003_add_tenancy_tables`.
+
+```
+workspaces
+  id                      UUID PK
+  organization_id         UUID FK -> organizations.id, ON DELETE CASCADE, indexed
+  name                    varchar(255)
+  slug                    varchar(255)            -- unique within organization (uq_workspace_org_slug)
+  status                  enum(active, archived)
+  created_at / updated_at timestamptz
+  deleted_at              timestamptz, nullable
+  created_by / updated_by UUID, nullable
+
+workspace_members
+  id            UUID PK
+  workspace_id  UUID FK -> workspaces.id, ON DELETE CASCADE, indexed
+  user_id       UUID FK -> users.id, ON DELETE CASCADE, indexed
+  role          enum(owner, admin, developer, viewer)
+  created_at / updated_at timestamptz
+  UNIQUE(workspace_id, user_id)  -- uq_workspace_member
+```
+
+Creating a workspace requires organization role ADMIN+ but auto-creates a `workspace_members`
+row with `role = owner` for the creator — see section 6 for why organization role alone doesn't
+grant ongoing workspace access.
 
 # 15. Document Schema
 
@@ -235,7 +321,60 @@ audit coverage (permission changes, uploads, deletes) expands as those features 
 
 # 27. API Keys Schema
 
-**Pending — Phase 2 (Enterprise platform).**
+**Pending — not yet scheduled in `05-task.md`.** Phase 2 as scoped implemented the
+organization/workspace/project hierarchy, membership, and invitations, but did not include API
+key management.
+
+---
+
+# Organization and Invitation Schema (no dedicated section number in the original TOC)
+
+**Organizations** — implemented in `backend/app/models/organization.py`, migration
+`0003_add_tenancy_tables`:
+
+```
+organizations
+  id                      UUID PK
+  name                    varchar(255)
+  slug                    varchar(255) UNIQUE, indexed
+  status                  enum(active, archived)
+  created_at / updated_at timestamptz
+  deleted_at              timestamptz, nullable
+  created_by / updated_by UUID, nullable
+
+organization_members
+  id               UUID PK
+  organization_id  UUID FK -> organizations.id, ON DELETE CASCADE, indexed
+  user_id          UUID FK -> users.id, ON DELETE CASCADE, indexed
+  role             enum(owner, admin, developer, viewer)
+  invited_by       UUID FK -> users.id, ON DELETE SET NULL, nullable
+  joined_at        timestamptz
+  UNIQUE(organization_id, user_id)  -- uq_org_member
+```
+
+Creating an organization always creates its first `organization_members` row with
+`role = owner` — there is no such thing as an organization with zero owners.
+
+**Invitations** — implemented in `backend/app/models/invitation.py`:
+
+```
+invitations
+  id               UUID PK
+  organization_id  UUID FK -> organizations.id, ON DELETE CASCADE, indexed
+  email            varchar(320), indexed
+  role             enum(owner, admin, developer, viewer)  -- role granted on acceptance
+  invited_by       UUID FK -> users.id, ON DELETE CASCADE
+  token_hash       varchar(255) UNIQUE   -- sha256(raw token); raw token never persisted
+  status           enum(pending, accepted, rejected, expired)
+  expires_at       timestamptz            -- 7-day TTL
+  accepted_at      timestamptz, nullable
+  created_at / updated_at timestamptz
+```
+
+Expiry is checked lazily (on accept/reject), not via a scheduled job — Celery Beat isn't wired up
+yet (docs/02-architecture.md section 166). No email service exists yet either; the raw invite
+token is returned directly in the API response only when `DEBUG=true`, mirroring the Phase 1
+password-reset pattern.
 
 # 28. Session Schema
 
@@ -283,7 +422,11 @@ Mandatory indexes, per docs/06-rule.md Database Rules:
 * HNSW index on every `vector` column once embedding tables exist.
 
 Applied so far: `users.email` (unique), `sessions.user_id`, `audit_logs.user_id`,
-`audit_logs.action`, `audit_logs.created_at` (see migration `0002_add_auth_tables`).
+`audit_logs.action`, `audit_logs.created_at` (migration `0002_add_auth_tables`);
+`organizations.slug` (unique), `organization_members.organization_id`/`.user_id`,
+`workspaces.organization_id`, `workspace_members.workspace_id`/`.user_id`,
+`projects.workspace_id`, `project_members.project_id`/`.user_id`,
+`invitations.organization_id`/`.email` (migration `0003_add_tenancy_tables`).
 
 ---
 

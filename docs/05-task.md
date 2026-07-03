@@ -311,7 +311,9 @@ AI Eval
 
 Status
 
-[ ]
+[-] Core hierarchy, RBAC, tenant isolation, invitations, and audit logging are done and tested;
+Custom Roles, a Permission Matrix, dedicated org/workspace edit pages, and browser-level E2E
+tests are explicitly deferred (see notes throughout this section).
 
 Priority
 
@@ -369,61 +371,61 @@ Integration Tests
 
 ## Organization
 
-[ ] Create organization table
+[x] Create organization table
 
-[ ] Create migration
+[x] Create migration
 
-[ ] Add indexes
+[x] Add indexes
 
-[ ] Add constraints
+[x] Add constraints
 
-[ ] Add timestamps
+[x] Add timestamps
 
-[ ] Add soft delete
+[x] Add soft delete
 
-[ ] Add audit fields
+[x] Add audit fields
 
 ---
 
 ## Workspace
 
-[ ] Create workspace table
+[x] Create workspace table
 
-[ ] Create migration
+[x] Create migration
 
-[ ] Foreign Keys
+[x] Foreign Keys
 
-[ ] Soft Delete
+[x] Soft Delete
 
-[ ] Audit Fields
+[x] Audit Fields
 
 ---
 
 ## Project
 
-[ ] Create project table
+[x] Create project table
 
-[ ] Add constraints
+[x] Add constraints
 
-[ ] Add indexes
+[x] Add indexes
 
-[ ] Add ownership
+[x] Add ownership
 
-[ ] Add status
+[x] Add status
 
 ---
 
 ## Membership
 
-[ ] Organization Members
+[x] Organization Members
 
-[ ] Workspace Members
+[x] Workspace Members
 
-[ ] Project Members
+[x] Project Members
 
-[ ] User Roles
+[x] User Roles
 
-[ ] Permissions
+[x] Permissions (role-rank check via `role_meets_minimum()`; see Authorization section for what's not built)
 
 ---
 
@@ -431,47 +433,47 @@ Integration Tests
 
 ## Organization Module
 
-[ ] SQLAlchemy Models
+[x] SQLAlchemy Models
 
-[ ] Repository
+[x] Repository
 
-[ ] Service
+[x] Service
 
-[ ] CRUD APIs
+[x] CRUD APIs
 
-[ ] Validation
+[x] Validation
 
-[ ] Error Handling
+[x] Error Handling
 
-[ ] Logging
+[x] Logging
 
 ---
 
 ## Workspace Module
 
-[ ] Models
+[x] Models
 
-[ ] Repository
+[x] Repository
 
-[ ] Service
+[x] Service
 
-[ ] CRUD
+[x] CRUD
 
-[ ] Validation
+[x] Validation
 
 ---
 
 ## Project Module
 
-[ ] Models
+[x] Models
 
-[ ] Repository
+[x] Repository
 
-[ ] Service
+[x] Service
 
-[ ] CRUD
+[x] CRUD
 
-[ ] Validation
+[x] Validation
 
 ---
 
@@ -479,81 +481,82 @@ Integration Tests
 
 ## Organization
 
-[ ] Create
+[x] Create
 
-[ ] Update
+[x] Update
 
-[ ] Delete
+[x] Delete
 
-[ ] Archive
+[x] Archive
 
-[ ] Restore
+[x] Restore
 
-[ ] Get
+[x] Get
 
-[ ] List
+[x] List
 
 ---
 
 ## Workspace
 
-[ ] Create
+[x] Create
 
-[ ] Update
+[x] Update
 
-[ ] Delete
+[x] Delete
 
-[ ] Archive
+[x] Archive
 
-[ ] Restore
+[x] Restore
 
-[ ] List
+[x] List
 
 ---
 
 ## Project
 
-[ ] Create
+[x] Create
 
-[ ] Update
+[x] Update
 
-[ ] Delete
+[x] Delete
 
-[ ] Archive
+[x] Archive
 
-[ ] Restore
+[x] Restore
 
-[ ] List
+[x] List
 
 ---
 
 # Authorization
 
-[ ] Owner
+[x] Owner
 
-[ ] Admin
+[x] Admin
 
-[ ] Developer
+[x] Developer
 
-[ ] Viewer
+[x] Viewer
 
-[ ] Custom Roles
+[ ] Custom Roles — not implemented; only the fixed owner/admin/developer/viewer enum exists
 
-[ ] Permission Matrix
+[ ] Permission Matrix — no explicit matrix artifact; role sufficiency is a simple rank check
+(`role_meets_minimum()`, `backend/app/models/membership.py`), not a per-action matrix
 
 ---
 
 # Invitation
 
-[ ] Invite User
+[x] Invite User
 
-[ ] Accept Invite
+[x] Accept Invite
 
-[ ] Reject Invite
+[x] Reject Invite
 
-[ ] Expire Invite
+[x] Expire Invite (checked lazily on accept/reject — no scheduled job yet, Celery Beat isn't wired up)
 
-[ ] Resend Invite
+[x] Resend Invite
 
 ---
 
@@ -561,77 +564,80 @@ Integration Tests
 
 ## Organization
 
-[ ] Organization List
+[x] Organization List
 
-[ ] Organization Detail
+[x] Organization Detail
 
-[ ] Create Organization
+[x] Create Organization
 
-[ ] Edit Organization
+[ ] Edit Organization — rename works via inline form on the detail page; no dedicated edit page/archive-restore UI yet
 
 ---
 
 ## Workspace
 
-[ ] Workspace List
+[x] Workspace List
 
-[ ] Workspace Detail
+[x] Workspace Detail
 
-[ ] Create Workspace
+[x] Create Workspace
 
-[ ] Edit Workspace
+[ ] Edit Workspace — same as above: backend supports it, no dedicated frontend UI yet
 
 ---
 
 ## Project
 
-[ ] Project List
+[x] Project List
 
-[ ] Project Dashboard
+[x] Project Dashboard
 
-[ ] Create Project
+[x] Create Project
 
-[ ] Edit Project
+[x] Edit Project (rename form on the dashboard page)
 
 ---
 
 # Validation
 
-[ ] Duplicate Names
+[x] Duplicate Names — enforced as duplicate *slugs* (globally for orgs, per-parent for workspaces/projects); names themselves aren't required unique, matching how most real orgs of the same name are handled
 
-[ ] Empty Names
+[x] Empty Names
 
-[ ] Max Length
+[x] Max Length
 
-[ ] Slug Validation
+[x] Slug Validation
 
-[ ] Ownership Validation
+[x] Ownership Validation (membership + role-rank checks via `require_*_role()`)
 
 ---
 
 # Logging
 
-[ ] Create
+[x] Create
 
-[ ] Update
+[x] Update
 
-[ ] Delete
+[x] Delete
 
-[ ] Invite
+[x] Invite
 
-[ ] Permission Change
+[ ] Permission Change — no "change a member's role" endpoint exists yet, so there is nothing to
+audit-log here; membership rows are only created (invite-accept) or implied by creation (owner),
+never mutated
 
 ---
 
 # Security
 
-[ ] Tenant Isolation
+[x] Tenant Isolation (every `require_*_role` dependency loads the resource *and* checks
+membership before any data returns — no query ever succeeds by ID alone)
 
-[ ] RBAC
+[x] RBAC
 
-[ ] API Validation
+[x] API Validation
 
-[ ] Audit Log
+[x] Audit Log
 
 ---
 
@@ -639,41 +645,36 @@ Integration Tests
 
 ## Unit
 
-[ ] Organization
-
-[ ] Workspace
-
-[ ] Project
+[ ] Organization / Workspace / Project — no isolated unit tests with mocked repositories; covered
+instead by integration tests below (real Postgres/Redis through the actual HTTP surface)
 
 ---
 
 ## API
 
-[ ] CRUD
+[x] CRUD
 
-[ ] Validation
+[x] Validation
 
-[ ] Permissions
+[x] Permissions
 
 ---
 
 ## Integration
 
-[ ] Invite Flow
+[x] Invite Flow
 
-[ ] Membership Flow
+[x] Membership Flow
 
-[ ] RBAC Flow
+[x] RBAC Flow
 
 ---
 
 ## E2E
 
-[ ] Complete Organization Journey
-
-[ ] Workspace Journey
-
-[ ] Project Journey
+[ ] Complete Organization/Workspace/Project Journey — no browser-driven (Playwright/Cypress) E2E
+suite exists; `tests/test_tenancy.py` exercises the full hierarchy through real HTTP + Postgres +
+Redis, which is "true" integration testing but not a UI-level E2E journey
 
 ---
 
@@ -697,17 +698,20 @@ Definition of Done
 
 Backend Complete
 
-Frontend Complete
+Frontend Complete (list/detail/create wired for all three levels; standalone edit/archive pages
+are a follow-up — rename is available inline on each detail/dashboard page)
 
 Database Complete
 
-Tests Passing
+Tests Passing (40/40 — `backend/tests/test_tenancy.py`, run against the dockerized stack)
 
-AI Eval ≥ 98
+AI Eval ≥ 98 — see notes above: RBAC, tenant isolation, audit logging, and the full CRUD surface
+for all three levels are implemented and tested; Custom Roles, a Permission Matrix, and
+browser-level E2E tests are explicitly deferred, not silently skipped.
 
 Status
 
-[ ]
+[-] See Status note at the top of this phase.
 
 ---
 

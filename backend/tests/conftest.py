@@ -42,11 +42,17 @@ async def client():
 
 @pytest_asyncio.fixture(autouse=True)
 async def _clean_auth_tables():
-    """Every auth/user test starts from an empty slate so registration and
-    lockout counters never leak across tests."""
+    """Every test starts from an empty slate so registration/lockout
+    counters, slugs, and memberships never leak across tests."""
     yield
     async with AsyncSessionLocal() as session:
-        await session.execute(text("TRUNCATE sessions, audit_logs, users CASCADE"))
+        await session.execute(
+            text(
+                "TRUNCATE invitations, project_members, projects, workspace_members, "
+                "workspaces, organization_members, organizations, sessions, audit_logs, "
+                "users CASCADE"
+            )
+        )
         await session.commit()
     redis_client = get_redis_client()
     async for key in redis_client.scan_iter(match="password_reset:*"):

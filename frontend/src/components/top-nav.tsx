@@ -11,6 +11,14 @@ export function TopNav() {
 
   return (
     <nav className="flex justify-end gap-2 p-4">
+      {!isLoading && isAuthenticated && (
+        <Link
+          href="/organizations"
+          className={cn(buttonVariants({ variant: 'ghost', size: 'sm' }))}
+        >
+          Organizations
+        </Link>
+      )}
       {!isLoading && (
         <Link
           href={isAuthenticated ? '/profile' : '/login'}

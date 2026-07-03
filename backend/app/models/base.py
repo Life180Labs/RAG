@@ -6,7 +6,7 @@ docs/06-rule.md Database Rules.
 """
 
 import uuid
-from datetime import datetime
+from datetime import UTC, datetime
 
 from sqlalchemy import DateTime, func
 from sqlalchemy.dialects.postgresql import UUID
@@ -27,8 +27,16 @@ class TimestampMixin:
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
+    # `onupdate` is a Python callable (not `func.now()`) so SQLAlchemy knows
+    # the new value immediately at flush time. A server-side onupdate would
+    # mark the attribute expired, requiring a lazy re-SELECT to learn it —
+    # which raises MissingGreenlet under asyncio the moment anything (e.g.
+    # Pydantic's `model_validate`) reads it outside the flush's greenlet.
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
+        DateTime(timezone=True),
+        server_default=func.now(),
+        onupdate=lambda: datetime.now(UTC),
+        nullable=False,
     )
 
 

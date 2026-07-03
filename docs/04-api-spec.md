@@ -118,19 +118,73 @@ Phase 1 — the dependency is exercised by tests but not yet wired to a real rou
 
 # 4. Organization APIs
 
-**Pending — Phase 2.** CRUD + archive/restore per `05-task.md` Phase 2 API section.
+Implemented (`backend/app/api/v1/organizations.py`, `backend/app/api/v1/invitations.py`).
+Every route except create/list requires organization membership at the role shown (RBAC via
+`require_organization_role()`, `backend/app/api/tenancy_deps.py`).
+
+| Method | Path                                                        | Min role | Purpose |
+|--------|--------------------------------------------------------------|----------|---------|
+| POST   | `/api/v1/organizations`                                       | — (any authenticated user) | Create org; creator becomes OWNER |
+| GET    | `/api/v1/organizations`                                        | — | List orgs the caller belongs to |
+| GET    | `/api/v1/organizations/{organization_id}`                       | VIEWER | Get org |
+| PATCH  | `/api/v1/organizations/{organization_id}`                       | ADMIN | Rename org |
+| POST   | `/api/v1/organizations/{organization_id}/archive`               | ADMIN | Archive |
+| POST   | `/api/v1/organizations/{organization_id}/restore`               | ADMIN | Restore |
+| DELETE | `/api/v1/organizations/{organization_id}`                       | VIEWER (service enforces OWNER) | Soft delete |
+| POST   | `/api/v1/organizations/{organization_id}/invitations`           | ADMIN | Invite by email + role |
+| GET    | `/api/v1/organizations/{organization_id}/invitations`           | ADMIN | List invitations |
+| POST   | `/api/v1/organizations/{organization_id}/invitations/{invitation_id}/resend` | ADMIN | Rotate token + extend TTL |
+| POST   | `/api/v1/invitations/accept`                                    | Bearer (any user) | Accept — email must match invitee |
+| POST   | `/api/v1/invitations/reject`                                    | Bearer (any user) | Reject |
+
+Notes:
+
+* Slugs are validated (`backend/app/schemas/validators.py`): lowercase alphanumeric with single
+  hyphens between segments, 3–63 characters. Duplicate slugs return `409 SLUG_TAKEN`.
+* Deleting an organization requires the caller's role to be exactly OWNER
+  (`403 OWNER_REQUIRED` otherwise) — checked in the service layer since the dependency only
+  guarantees membership, not a specific role, for this route.
+* `POST /invitations` returns `data.invite_token` only when `DEBUG=true` (no email service
+  exists yet, same pattern as Phase 1 password reset).
+* Invitation acceptance is rejected with `403 EMAIL_MISMATCH` if the authenticated user's email
+  doesn't match the invited address, and with `409 INVITATION_NOT_PENDING` /
+  `401 INVITATION_EXPIRED` for already-resolved or expired invitations.
 
 # 5. Workspace APIs
 
-**Pending — Phase 2.**
+Implemented (`backend/app/api/v1/workspaces.py`). Creating a workspace requires organization
+ADMIN+; every other route requires workspace membership (`require_workspace_role()`) — see
+docs/03-database.md section 6 for why organization role alone isn't sufficient.
+
+| Method | Path                                                  | Min role | Purpose |
+|--------|--------------------------------------------------------|----------|---------|
+| POST   | `/api/v1/organizations/{organization_id}/workspaces`     | Org ADMIN | Create; creator becomes workspace OWNER |
+| GET    | `/api/v1/organizations/{organization_id}/workspaces`     | Org VIEWER | List workspaces in the org |
+| GET    | `/api/v1/workspaces/{workspace_id}`                       | Workspace VIEWER | Get |
+| PATCH  | `/api/v1/workspaces/{workspace_id}`                       | Workspace ADMIN | Rename |
+| POST   | `/api/v1/workspaces/{workspace_id}/archive`               | Workspace ADMIN | Archive |
+| POST   | `/api/v1/workspaces/{workspace_id}/restore`               | Workspace ADMIN | Restore |
+| DELETE | `/api/v1/workspaces/{workspace_id}`                       | Workspace OWNER | Soft delete |
 
 # 6. Project APIs
 
-**Pending — Phase 2.**
+Implemented (`backend/app/api/v1/projects.py`). Same pattern as workspaces, one level down:
+creating a project requires workspace ADMIN+; managing it requires project membership.
+
+| Method | Path                                                | Min role | Purpose |
+|--------|-------------------------------------------------------|----------|---------|
+| POST   | `/api/v1/workspaces/{workspace_id}/projects`            | Workspace ADMIN | Create; creator becomes project OWNER |
+| GET    | `/api/v1/workspaces/{workspace_id}/projects`            | Workspace VIEWER | List projects in the workspace |
+| GET    | `/api/v1/projects/{project_id}`                          | Project VIEWER | Get |
+| PATCH  | `/api/v1/projects/{project_id}`                          | Project ADMIN | Rename |
+| POST   | `/api/v1/projects/{project_id}/archive`                  | Project ADMIN | Archive |
+| POST   | `/api/v1/projects/{project_id}/restore`                  | Project ADMIN | Restore |
+| DELETE | `/api/v1/projects/{project_id}`                          | Project OWNER | Soft delete |
 
 # 7. Repository APIs
 
-**Pending — Phase 3.**
+**Pending — Phase 3.** (This is the "Repository" resource — a document container — distinct
+from the `app/repositories/` data-access layer used throughout the backend.)
 
 # 8. Document APIs
 
@@ -242,6 +296,22 @@ Authentication-specific (Phase 1, all subclass the codes above):
 | `SESSION_REVOKED`     | 401         | Refresh token's session was logged out |
 | `SESSION_EXPIRED`     | 401         | Refresh token's session TTL elapsed |
 | `USER_NOT_FOUND`      | 404         | Referenced user no longer exists |
+
+Multi-tenancy-specific (Phase 2):
+
+| Code                      | HTTP Status | Meaning |
+|----------------------------|-------------|---------|
+| `ORGANIZATION_NOT_FOUND`    | 404         | Org doesn't exist or is soft-deleted |
+| `WORKSPACE_NOT_FOUND`       | 404         | Workspace doesn't exist or is soft-deleted |
+| `PROJECT_NOT_FOUND`         | 404         | Project doesn't exist or is soft-deleted |
+| `NOT_A_MEMBER`              | 403         | Caller has no membership row at this level |
+| `OWNER_REQUIRED`            | 403         | Action requires the OWNER role specifically |
+| `SLUG_TAKEN`                | 409         | Slug already used (scope depends on level: global for orgs, per-parent for workspaces/projects) |
+| `ALREADY_MEMBER`            | 409         | Invitee is already a member of the organization |
+| `INVITE_ALREADY_PENDING`    | 409         | A pending invitation already exists for that email |
+| `INVITATION_NOT_PENDING`    | 409         | Invitation was already accepted/rejected/expired |
+| `INVITATION_EXPIRED`        | 401         | Invitation's 7-day TTL has elapsed |
+| `EMAIL_MISMATCH`            | 403         | Accepting/rejecting user's email doesn't match the invitation |
 
 Domain-specific codes (e.g. `DOCUMENT_NOT_FOUND`) are added by raising a subclass of `AppError`
 (`backend/app/core/exceptions.py`) with a specific `code` as each domain is implemented — never
