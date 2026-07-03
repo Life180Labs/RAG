@@ -13,6 +13,7 @@ from app.models import (  # noqa: F401
     invitation,
     organization,
     project,
+    repository,
     session,
     user,
     workspace,

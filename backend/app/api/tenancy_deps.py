@@ -25,6 +25,7 @@ from app.db.session import get_db
 from app.models.membership import MemberRole, role_meets_minimum
 from app.models.organization import OrganizationMember
 from app.models.project import ProjectMember
+from app.models.repository import RepositoryMember
 from app.models.user import User
 from app.models.workspace import WorkspaceMember
 from app.repositories.audit_log_repository import AuditLogRepository
@@ -32,15 +33,18 @@ from app.repositories.invitation_repository import InvitationRepository
 from app.repositories.membership_repository import (
     OrganizationMemberRepository,
     ProjectMemberRepository,
+    RepositoryMemberRepository,
     WorkspaceMemberRepository,
 )
 from app.repositories.organization_repository import OrganizationRepository
 from app.repositories.project_repository import ProjectRepository
+from app.repositories.repository_repository import RepositoryRepository
 from app.repositories.user_repository import UserRepository
 from app.repositories.workspace_repository import WorkspaceRepository
 from app.services.invitation_service import InvitationService
 from app.services.organization_service import OrganizationService
 from app.services.project_service import ProjectService
+from app.services.repository_service import RepositoryService
 from app.services.workspace_service import WorkspaceService
 
 
@@ -70,6 +74,16 @@ def get_project_repository(db: AsyncSession = Depends(get_db)) -> ProjectReposit
 
 def get_project_member_repository(db: AsyncSession = Depends(get_db)) -> ProjectMemberRepository:
     return ProjectMemberRepository(db)
+
+
+def get_repository_repository(db: AsyncSession = Depends(get_db)) -> RepositoryRepository:
+    return RepositoryRepository(db)
+
+
+def get_repository_member_repository(
+    db: AsyncSession = Depends(get_db),
+) -> RepositoryMemberRepository:
+    return RepositoryMemberRepository(db)
 
 
 def require_organization_role(minimum: MemberRole):
@@ -144,6 +158,30 @@ def require_project_role(minimum: MemberRole):
     return _dependency
 
 
+def require_repository_role(minimum: MemberRole):
+    """`Depends(require_repository_role(MemberRole.ADMIN))` on a route with
+    a `repository_id` path parameter."""
+
+    async def _dependency(
+        repository_id: uuid.UUID,
+        current_user: User = Depends(get_current_user),
+        repository_repo: RepositoryRepository = Depends(get_repository_repository),
+        member_repo: RepositoryMemberRepository = Depends(get_repository_member_repository),
+    ) -> RepositoryMember:
+        repository = await repository_repo.get_active_by_id(repository_id)
+        if repository is None:
+            raise NotFoundError("Repository not found.", code="REPOSITORY_NOT_FOUND")
+
+        membership = await member_repo.get_membership(repository_id, current_user.id)
+        if membership is None:
+            raise ForbiddenError("You are not a member of this repository.", code="NOT_A_MEMBER")
+        if not role_meets_minimum(membership.role, minimum):
+            raise ForbiddenError("Insufficient role for this action.", code="FORBIDDEN")
+        return membership
+
+    return _dependency
+
+
 def get_organization_service(
     organization_repository: OrganizationRepository = Depends(get_organization_repository),
     member_repository: OrganizationMemberRepository = Depends(get_organization_member_repository),
@@ -181,3 +219,11 @@ def get_invitation_service(
     return InvitationService(
         invitation_repository, member_repository, user_repository, audit_log_repository
     )
+
+
+def get_repository_service(
+    repository_repository: RepositoryRepository = Depends(get_repository_repository),
+    member_repository: RepositoryMemberRepository = Depends(get_repository_member_repository),
+    audit_log_repository: AuditLogRepository = Depends(get_audit_log_repository),
+) -> RepositoryService:
+    return RepositoryService(repository_repository, member_repository, audit_log_repository)

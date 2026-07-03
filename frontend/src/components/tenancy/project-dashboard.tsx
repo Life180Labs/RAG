@@ -11,6 +11,8 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Skeleton } from '@/components/ui/skeleton';
+import { CreateRepositoryForm } from '@/components/tenancy/create-repository-form';
+import { useRepositories } from '@/hooks/use-repositories';
 import { useProject } from '@/hooks/use-tenancy';
 import { ApiRequestError } from '@/services/api-client';
 import { updateProject } from '@/services/tenancy-service';
@@ -25,6 +27,11 @@ export function ProjectDashboard({
   projectId: string;
 }) {
   const { data: project, isLoading, isError } = useProject(projectId);
+  const {
+    data: repositories,
+    isLoading: isRepositoriesLoading,
+    isError: isRepositoriesError,
+  } = useRepositories(projectId);
   const queryClient = useQueryClient();
   const [name, setName] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -115,6 +122,58 @@ export function ProjectDashboard({
               {isSubmitting ? 'Saving…' : 'Save'}
             </Button>
           </form>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>New repository</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <CreateRepositoryForm projectId={projectId} />
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Repositories</CardTitle>
+        </CardHeader>
+        <CardContent>
+          {isRepositoriesLoading && (
+            <div className="space-y-2" data-testid="repositories-loading">
+              <Skeleton className="h-10 w-full" />
+            </div>
+          )}
+
+          {isRepositoriesError && (
+            <Alert variant="destructive">
+              <AlertTitle>Couldn&apos;t load repositories</AlertTitle>
+            </Alert>
+          )}
+
+          {repositories && repositories.length === 0 && (
+            <p className="text-muted-foreground text-sm" data-testid="repositories-empty">
+              No repositories yet. Create one above.
+            </p>
+          )}
+
+          {repositories && repositories.length > 0 && (
+            <ul className="divide-border divide-y" data-testid="repositories-list">
+              {repositories.map((repository) => (
+                <li key={repository.id} className="flex items-center justify-between py-3">
+                  <Link
+                    href={`/organizations/${organizationId}/workspaces/${workspaceId}/projects/${projectId}/repositories/${repository.id}`}
+                    className="font-medium hover:underline"
+                  >
+                    {repository.name}
+                  </Link>
+                  <Badge variant={repository.status === 'active' ? 'default' : 'secondary'}>
+                    {repository.status}
+                  </Badge>
+                </li>
+              ))}
+            </ul>
+          )}
         </CardContent>
       </Card>
     </div>

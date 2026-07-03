@@ -167,8 +167,59 @@ implemented starting with the phases that introduce those entities.
 
 # 11. Repository Schema
 
-**Pending — Phase 3.** (Note: this is the "Repository" resource — a container for documents —
+Implemented in `backend/app/models/repository.py`, migration `0004_add_repository_tables`. (This
+is the "Repository" *resource* — a container for documents/embeddings/evaluations/experiments —
 distinct from the `app/repositories/` data-access layer, which already exists for every table.)
+
+```
+repositories
+  id                       UUID PK
+  project_id               UUID FK -> projects.id, ON DELETE CASCADE, indexed
+  name                     varchar(255)
+  slug                     varchar(255)          -- unique within project (uq_repository_project_slug)
+  description              text, nullable
+  status                   enum(active, archived)
+
+  -- Settings: identifiers only. The chunking/embedding/retrieval/reranking/prompt engines
+  -- these select are implemented in later phases; storing the setting now doesn't imply
+  -- the engine exists yet.
+  default_chunk_strategy   varchar(100), nullable
+  default_embedding_model  varchar(100), nullable
+  default_retriever        varchar(100), nullable
+  default_reranker         varchar(100), nullable
+  default_prompt_version   varchar(100), nullable
+
+  -- Statistics: start at zero, incremented by the document/chunk/embedding/retrieval
+  -- phases once they exist.
+  document_count           int, default 0
+  chunk_count              int, default 0
+  embedding_count          int, default 0
+  storage_used_bytes       bigint, default 0
+  retrieval_count          int, default 0
+
+  created_at / updated_at timestamptz
+  deleted_at               timestamptz, nullable
+  created_by / updated_by  UUID, nullable
+
+repository_members
+  id             UUID PK
+  repository_id  UUID FK -> repositories.id, ON DELETE CASCADE, indexed
+  user_id        UUID FK -> users.id, ON DELETE CASCADE, indexed
+  role           enum(owner, admin, developer, viewer)
+  created_at / updated_at timestamptz
+  UNIQUE(repository_id, user_id)  -- uq_repository_member
+```
+
+Creating a repository auto-creates a `repository_members` row with `role = owner` for the
+creator — the same explicit-membership pattern as workspaces/projects (section 6). "Activity"
+(docs/05-task.md Phase 3) is served by querying `audit_logs` filtered on
+`resource = repository_id` rather than a dedicated activity table — the audit log already
+captures every mutation.
+
+**Explicitly not implemented**: Clone/Duplicate/Export/Import (docs/05-task.md Phase 3
+Repository Features) only make sense once documents/embeddings exist to actually copy or move,
+which is a later phase; Custom Roles and a Permission Matrix remain deferred from Phase 2 for
+the same reasons given there.
 
 # 12. Project Schema
 

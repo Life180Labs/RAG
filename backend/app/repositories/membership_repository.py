@@ -1,7 +1,8 @@
-"""Repositories for the three membership tables. They share an identical
-shape (org/workspace/project + user + role), but stay separate classes —
-one per table — rather than a single generic one, since each is scoped to
-a different foreign key and the base repository already generalizes CRUD.
+"""Repositories for the four membership tables. They share an identical
+shape (org/workspace/project/repository + user + role), but stay separate
+classes — one per table — rather than a single generic one, since each is
+scoped to a different foreign key and the base repository already
+generalizes CRUD.
 """
 
 import uuid
@@ -10,6 +11,7 @@ from sqlalchemy import select
 
 from app.models.organization import OrganizationMember
 from app.models.project import ProjectMember
+from app.models.repository import RepositoryMember
 from app.models.workspace import WorkspaceMember
 from app.repositories.base import BaseRepository
 
@@ -62,6 +64,21 @@ class ProjectMemberRepository(BaseRepository[ProjectMember]):
             select(ProjectMember).where(
                 ProjectMember.project_id == project_id,
                 ProjectMember.user_id == user_id,
+            )
+        )
+        return result.scalar_one_or_none()
+
+
+class RepositoryMemberRepository(BaseRepository[RepositoryMember]):
+    model = RepositoryMember
+
+    async def get_membership(
+        self, repository_id: uuid.UUID, user_id: uuid.UUID
+    ) -> RepositoryMember | None:
+        result = await self.session.execute(
+            select(RepositoryMember).where(
+                RepositoryMember.repository_id == repository_id,
+                RepositoryMember.user_id == user_id,
             )
         )
         return result.scalar_one_or_none()

@@ -48,9 +48,9 @@ async def _clean_auth_tables():
     async with AsyncSessionLocal() as session:
         await session.execute(
             text(
-                "TRUNCATE invitations, project_members, projects, workspace_members, "
-                "workspaces, organization_members, organizations, sessions, audit_logs, "
-                "users CASCADE"
+                "TRUNCATE invitations, repository_members, repositories, project_members, "
+                "projects, workspace_members, workspaces, organization_members, organizations, "
+                "sessions, audit_logs, users CASCADE"
             )
         )
         await session.commit()

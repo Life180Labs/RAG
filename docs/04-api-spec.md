@@ -183,8 +183,29 @@ creating a project requires workspace ADMIN+; managing it requires project membe
 
 # 7. Repository APIs
 
-**Pending — Phase 3.** (This is the "Repository" resource — a document container — distinct
-from the `app/repositories/` data-access layer used throughout the backend.)
+Implemented (`backend/app/api/v1/repositories.py`). (This is the "Repository" *resource* — a
+document container — distinct from the `app/repositories/` data-access layer used throughout the
+backend.) Creating a repository requires project ADMIN+; every other route requires
+repository-level membership.
+
+| Method | Path                                                     | Min role | Purpose |
+|--------|-------------------------------------------------------------|----------|---------|
+| POST   | `/api/v1/projects/{project_id}/repositories`                  | Project ADMIN | Create; creator becomes repository OWNER |
+| GET    | `/api/v1/projects/{project_id}/repositories`                  | Project VIEWER | List repositories in the project |
+| GET    | `/api/v1/projects/{project_id}/repositories/search?q=`        | Project VIEWER | Search by name/description (`ILIKE`) |
+| GET    | `/api/v1/repositories/{repository_id}`                         | Repository VIEWER | Get |
+| PATCH  | `/api/v1/repositories/{repository_id}`                         | Repository ADMIN | Rename / update description |
+| PATCH  | `/api/v1/repositories/{repository_id}/settings`                | Repository ADMIN | Update default chunk strategy/embedding model/retriever/reranker/prompt version |
+| POST   | `/api/v1/repositories/{repository_id}/archive`                 | Repository ADMIN | Archive |
+| POST   | `/api/v1/repositories/{repository_id}/restore`                 | Repository ADMIN | Restore |
+| DELETE | `/api/v1/repositories/{repository_id}`                         | Repository OWNER | Soft delete |
+| GET    | `/api/v1/repositories/{repository_id}/activity`                | Repository VIEWER | Recent audit log entries for this repository |
+
+Statistics (`document_count`, `chunk_count`, `embedding_count`, `storage_used_bytes`,
+`retrieval_count`) are returned on every `RepositoryRead` response and currently always zero —
+they're incremented by the document/chunk/embedding/retrieval phases once those exist, not by
+anything in this phase. Search is a simple `ILIKE` match on name/description, not a full-text or
+vector search (no documents are indexed yet).
 
 # 8. Document APIs
 
@@ -312,6 +333,15 @@ Multi-tenancy-specific (Phase 2):
 | `INVITATION_NOT_PENDING`    | 409         | Invitation was already accepted/rejected/expired |
 | `INVITATION_EXPIRED`        | 401         | Invitation's 7-day TTL has elapsed |
 | `EMAIL_MISMATCH`            | 403         | Accepting/rejecting user's email doesn't match the invitation |
+
+Repository-specific (Phase 3):
+
+| Code                       | HTTP Status | Meaning |
+|-----------------------------|-------------|---------|
+| `REPOSITORY_NOT_FOUND`      | 404         | Repository doesn't exist or is soft-deleted |
+
+(`NOT_A_MEMBER`, `OWNER_REQUIRED`, and `SLUG_TAKEN` are reused from the Phase 2 table above —
+repositories follow the identical org/workspace/project RBAC and slug-uniqueness pattern.)
 
 Domain-specific codes (e.g. `DOCUMENT_NOT_FOUND`) are added by raising a subclass of `AppError`
 (`backend/app/core/exceptions.py`) with a specific `code` as each domain is implemented — never

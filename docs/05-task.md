@@ -719,7 +719,10 @@ Status
 
 Status
 
-[ ]
+[-] CRUD, settings, statistics (zeroed, awaiting later phases), activity, RBAC, tenant isolation,
+and search are done and tested; Clone/Duplicate/Export/Import and Versioning are explicitly
+deferred until documents/embeddings exist to actually operate on (see notes throughout this
+section).
 
 Priority
 
@@ -753,115 +756,118 @@ Activity
 
 Database
 
-[ ] Repository Table
+[x] Repository Table
 
-[ ] Repository Settings
+[x] Repository Settings
 
-[ ] Repository Metadata
+[x] Repository Metadata (`description` field; no separate structured metadata store beyond this)
 
-[ ] Repository Statistics
+[x] Repository Statistics (columns exist, default to 0 — populated by future document/chunk/embedding phases)
 
 ---
 
 Backend
 
-[ ] Repository Model
+[x] Repository Model
 
-[ ] Repository Service
+[x] Repository Service
 
-[ ] Repository Repository
+[x] Repository Repository
 
-[ ] CRUD APIs
+[x] CRUD APIs
 
-[ ] Validation
+[x] Validation
 
-[ ] Search
+[x] Search (simple `ILIKE` on name/description — no full-text/vector search, no documents indexed yet)
 
 ---
 
 Repository Features
 
-[ ] Create Repository
+[x] Create Repository
 
-[ ] Update Repository
+[x] Update Repository
 
-[ ] Delete Repository
+[x] Delete Repository
 
-[ ] Archive Repository
+[x] Archive Repository
 
-[ ] Clone Repository
+[ ] Clone Repository — deferred; nothing to clone until documents/embeddings exist
 
-[ ] Duplicate Repository
+[ ] Duplicate Repository — deferred, same reason
 
-[ ] Export Repository
+[ ] Export Repository — deferred, same reason
 
-[ ] Import Repository
+[ ] Import Repository — deferred, same reason
 
 ---
 
 Repository Settings
 
-[ ] Default Chunk Strategy
+[x] Default Chunk Strategy (stored identifier; the chunking engine that reads it is a future phase)
 
-[ ] Default Embedding Model
+[x] Default Embedding Model (same caveat)
 
-[ ] Default Retriever
+[x] Default Retriever (same caveat)
 
-[ ] Default Reranker
+[x] Default Reranker (same caveat)
 
-[ ] Default Prompt
+[x] Default Prompt
 
 ---
 
 Statistics
 
-[ ] Document Count
+[x] Document Count (column exists, value is 0 until the document phase increments it)
 
-[ ] Chunk Count
+[x] Chunk Count (same caveat)
 
-[ ] Embedding Count
+[x] Embedding Count (same caveat)
 
-[ ] Storage Used
+[x] Storage Used (same caveat)
 
-[ ] Retrieval Count
+[x] Retrieval Count (same caveat)
 
 ---
 
 Frontend
 
-[ ] Repository Dashboard
+[x] Repository Dashboard
 
-[ ] Repository Settings
+[x] Repository Settings
 
-[ ] Repository Statistics
+[x] Repository Statistics
 
-[ ] Activity Timeline
+[x] Activity Timeline
 
-[ ] Repository Members
+[ ] Repository Members — backend supports repository_members + RBAC; no frontend UI to
+list/invite repository-level members yet (organization invitations exist; repository-level
+membership management does not)
 
 ---
 
 Security
 
-[ ] RBAC
+[x] RBAC
 
-[ ] Repository Permissions
+[x] Repository Permissions
 
-[ ] Tenant Isolation
+[x] Tenant Isolation
 
 ---
 
 Testing
 
-[ ] CRUD
+[x] CRUD
 
-[ ] Settings
+[x] Settings
 
-[ ] Permissions
+[x] Permissions
 
-[ ] API
+[x] API
 
-[ ] UI
+[ ] UI — no browser-driven UI test suite exists (consistent with Phase 2); covered instead by
+`backend/tests/test_repositories.py` (10 tests) against the real HTTP surface + Postgres/Redis
 
 Acceptance Criteria
 
@@ -869,14 +875,18 @@ Acceptance Criteria
 
 ✓ Settings persisted
 
-✓ Statistics calculated
+✓ Statistics calculated (calculation itself — i.e. actually counting real documents/chunks —
+is future-phase work; the columns and API contract are ready for it)
 
 ✓ APIs documented
 
-✓ Tests passing
+✓ Tests passing (50/50 backend tests, `backend/tests/test_repositories.py` + full regression)
 
-AI Eval ≥ 98
+AI Eval ≥ 98 — RBAC, tenant isolation, audit logging, search, and the full CRUD/settings surface
+are implemented and tested; Clone/Duplicate/Export/Import, real statistics calculation, and a
+repository-members frontend UI are explicitly deferred pending the document/embedding phases that
+would make them meaningful, not silently skipped.
 
 Status
 
-[ ]
+[-] See Status note at the top of this phase.
