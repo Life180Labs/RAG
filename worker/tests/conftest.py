@@ -5,6 +5,7 @@ import uuid
 # docker/docker-compose.yml, same as the backend's integration tests —
 # must be set before `common.db`/`common.storage` are first imported.
 os.environ.setdefault("DATABASE_URL", "postgresql+psycopg://rag:rag@localhost:5433/rag")
+os.environ.setdefault("REDIS_URL", "redis://localhost:6380/0")
 os.environ.setdefault("MINIO_ENDPOINT", "localhost:9002")
 os.environ.setdefault("MINIO_ACCESS_KEY", "ragadmin")
 os.environ.setdefault("MINIO_SECRET_KEY", "ragadminsecret")

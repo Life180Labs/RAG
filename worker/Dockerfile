@@ -21,6 +21,10 @@ FROM python:3.11-slim AS runtime
 WORKDIR /app
 ENV PYTHONPATH=/app
 
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    tesseract-ocr poppler-utils \
+    && rm -rf /var/lib/apt/lists/*
+
 RUN useradd --create-home --uid 1000 appuser
 COPY --from=builder /install /usr/local
 COPY --from=builder /build/common ./common

@@ -354,12 +354,16 @@ upload_sessions
 `document_status` state machine (docs/02-architecture.md section 46): `uploaded -> validating ->
 validated -> parsing -> ocr -> cleaning -> chunking -> embedding -> indexing -> ready`, with a
 parallel `failed_upload` / `failed_validation` / `failed_parse` / `failed_ocr` / `failed_chunk` /
-`failed_embed` / `failed_index` at each stage. Only `uploaded` / `validating` / `validated` /
-`failed_validation` are reachable today — the backend validates and stores the file synchronously
+`failed_embed` / `failed_index` at each stage. `uploaded` through `chunking` are reachable today:
+the backend validates and stores the file synchronously
 (size/extension/password-protection/virus-scan-stub, `backend/app/core/document_validation.py`),
-then enqueues `document_worker.finalize_upload` (`worker/document_worker/tasks.py`) which confirms
-the object actually landed in MinIO and flips `uploaded -> validated` (or `failed_validation`).
-Parsing/OCR/chunking/embedding/indexing continue this same state machine in later phases.
+then a `BackgroundTasks`-scheduled call (see below) enqueues `document_worker.finalize_upload`
+(`uploaded -> validated`/`failed_validation`), which itself enqueues
+`document_worker.parse_document` (`validated -> parsing -> [ocr] -> cleaning -> chunking`, or
+`failed_parse`/`failed_ocr`) once storage is confirmed. `chunking` is the "ready for the next
+phase" marker — Phase 6 (Chunking Engine) is what actually advances a document past it, the same
+way `validated` meant "ready for parsing" before Phase 5 existed. Embedding/indexing/ready
+continue this state machine in their own future phases.
 
 `DocumentVersion` is **not** given `TimestampMixin` — each row is an immutable snapshot of one
 upload, so it owns a plain `created_at`/`created_by` rather than a mutable `updated_at`.
@@ -372,6 +376,75 @@ is the one set of repository statistics actually populated today; `chunk_count` 
 Duplicate detection is per-repository, by `sha256_hash` (`get_by_hash_in_repository`) — uploading
 identical bytes into the same repository is rejected with `DUPLICATE_DOCUMENT`; the same bytes in
 two different repositories are unrelated documents.
+
+**Enqueue timing bug (found via live e2e testing, fixed in Phase 5):** `DocumentService.upload`/
+`.create_new_version` run inside the request's still-open DB transaction (`get_db` only commits
+after the route handler returns — see `backend/app/db/session.py`). The original code called
+`enqueue_finalize_upload` from inside the service, so a fast worker could query for the document
+*before* Postgres had actually committed it, reliably reproducing `document_not_found` once the
+worker's pickup latency dropped low enough. Fixed by moving the enqueue call to the controller via
+FastAPI's `BackgroundTasks`, which only run after the response — and therefore after `get_db`'s
+commit — have completed (`app/api/v1/documents.py`).
+
+## Document Content (Phase 5)
+
+Implemented in `backend/app/models/document_content.py`, migration
+`0006_add_document_content_table`. Populated by `document_worker.parse_document`
+(`worker/document_worker/tasks.py`), not by the backend.
+
+```
+document_content
+  id                     UUID PK
+  document_id            UUID FK -> documents.id, ON DELETE CASCADE, indexed, UNIQUE
+  version                int                    -- which document_versions.version this parse is of
+  raw_text               text                   -- cleaned, flattened prose (all non-image blocks)
+  structured_content     jsonb                  -- ordered typed blocks — see below
+  language               varchar(10), nullable  -- ISO 639-1, via langdetect
+  page_count             int, nullable          -- PDF only; DOCX/HTML/etc. have no fixed pagination
+  word_count             int, nullable
+  character_count        int, nullable
+  reading_time_seconds   int, nullable          -- word_count / 200wpm
+  parser_used            varchar(50)            -- "pymupdf" | "python-docx" | "beautifulsoup4" |
+                                                 -- "markdown-it-py" | "native" | "pandas" | "lxml"
+  ocr_used               boolean, default false
+  ocr_confidence         float, nullable        -- mean Tesseract word confidence (0-100) across
+                                                 -- OCR'd pages only, when ocr_used is true
+  created_at / updated_at timestamptz
+  UNIQUE(document_id)  -- uq_document_content_document
+```
+
+One row per *document* (not per version) — re-parsing (e.g. after a new version is uploaded)
+overwrites this row via `ON CONFLICT (document_id) DO UPDATE`, since only the current version's
+content ever feeds later phases (chunking/embedding); history isn't kept here (the immutable
+`document_versions` table already has each version's raw bytes if re-parsing an old version is
+ever needed).
+
+`structured_content` is an ordered array of typed blocks — parsers never flatten a document to
+plain text (docs/02-architecture.md section 30):
+
+```
+{"type": "title" | "heading" | "paragraph" | "list" | "table" | "code" | "image",
+ "text": "...", "level": int | null, "page": int | null}
+```
+
+`level` is only set for `heading` blocks (1 = h1/Heading 1/etc.); `page` is only set for PDF blocks
+(every other format has no fixed pagination, so it's always `null`). Structure is inferred per
+format rather than via a separate structure-detection pass: PDF uses font-size ratios (via
+PyMuPDF) plus `page.find_tables()` for real table detection; DOCX/HTML/Markdown use their native
+style/tag/token markup; TXT/CSV/JSON/XML have no real structure, so CSV/JSON become a single
+table/code block and TXT/XML are split into paragraphs.
+
+OCR (`document_worker/parsing/ocr.py`, Tesseract via `pytesseract`/`pdf2image`) only runs on PDF
+pages where the text layer PyMuPDF extracted is near-empty (<20 characters) — a real scanned page,
+not a re-OCR of already-correct text. EasyOCR/PaddleOCR/cloud OCR providers are documented
+alternatives in docs/02-architecture.md section 26 but not implemented; Tesseract is the one real,
+tested engine for this phase (same "implement one real path, document the rest as deferred"
+pattern as Phase 4's virus-scan stub).
+
+Retries/DLQ: `parse_document` uses Celery's `autoretry_for` (3 attempts, exponential backoff).
+There's no separate dead-letter queue infrastructure — once retries are exhausted, the persisted
+`FAILED_PARSE`/`FAILED_OCR` status and `status_message` on `documents` *is* the dead-letter record,
+consistent with how Phase 4 already surfaces failures.
 
 # 16. Chunk Schema
 

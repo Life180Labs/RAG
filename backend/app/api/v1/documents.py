@@ -8,12 +8,13 @@ requires VIEWER+; delete/restore require ADMIN+.
 
 import uuid
 
-from fastapi import APIRouter, Depends, File, Request, UploadFile
+from fastapi import APIRouter, BackgroundTasks, Depends, File, Request, UploadFile
 from fastapi.responses import StreamingResponse
 
 from app.api.document_deps import DocumentAccess, get_document_service, require_document_role
 from app.api.tenancy_deps import require_repository_role
 from app.core.exceptions import AppError
+from app.core.task_queue import enqueue_finalize_upload
 from app.models.membership import MemberRole
 from app.models.repository import RepositoryMember
 from app.schemas.common import SuccessResponse
@@ -37,6 +38,7 @@ class _NoFilenameError(AppError):
 )
 async def upload_document(
     request: Request,
+    background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     membership: RepositoryMember = Depends(require_repository_role(MemberRole.ADMIN)),
     service: DocumentService = Depends(get_document_service),
@@ -52,6 +54,11 @@ async def upload_document(
         content_type=file.content_type or "application/octet-stream",
         content=content,
     )
+    # Scheduled via BackgroundTasks (runs after the response, i.e. after
+    # `get_db`'s commit) rather than called from the service — see
+    # app/services/document_service.py for why enqueueing any earlier is
+    # a real race with the worker.
+    background_tasks.add_task(enqueue_finalize_upload, str(document.id))
     return SuccessResponse(
         data=DocumentRead.model_validate(document), request_id=_request_id(request)
     )
@@ -99,6 +106,7 @@ async def list_document_versions(
 @router.post("/documents/{document_id}/versions", response_model=SuccessResponse[DocumentRead])
 async def upload_document_version(
     request: Request,
+    background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
     access: DocumentAccess = Depends(require_document_role(MemberRole.ADMIN)),
     service: DocumentService = Depends(get_document_service),
@@ -114,6 +122,7 @@ async def upload_document_version(
         content_type=file.content_type or "application/octet-stream",
         content=content,
     )
+    background_tasks.add_task(enqueue_finalize_upload, str(updated.id))
     return SuccessResponse(
         data=DocumentRead.model_validate(updated), request_id=_request_id(request)
     )

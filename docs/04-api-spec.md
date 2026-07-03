@@ -252,7 +252,19 @@ without touching call sites). Duplicate detection is by `sha256_hash` within the
 
 # 10. Parsing APIs
 
-**Pending — Document Processing phase.**
+Parsing itself runs entirely in the background (`document_worker.parse_document`, triggered
+automatically after `finalize_upload` succeeds) — there is no endpoint to trigger or poll parsing
+directly. Its results surface in two places:
+
+- `GET /api/v1/documents/{document_id}` (section 8) now returns populated `language` and
+  `page_count` fields once parsing completes (previously always `null`, since Phase 4 had nothing
+  that computed them). `status` progresses `validated -> parsing -> [ocr] -> cleaning -> chunking`
+  (or `failed_parse`/`failed_ocr`) — the same field Phase 4 already exposed.
+- The full structured content, word/character counts, reading time, OCR usage/confidence, and
+  parser used are persisted to `document_content` (docs/03-database.md "Document Content (Phase
+  5)"), but **no endpoint exposes this table yet** — a `GET .../content` route is deferred to
+  whichever future phase first needs to display or consume parsed content directly (most likely
+  Phase 6, Chunking, which reads it internally rather than over HTTP anyway).
 
 # 11. Chunking APIs
 

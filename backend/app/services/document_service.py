@@ -5,6 +5,15 @@ synchronously here, before anything is stored — the background
 `finalize_upload` task's job is only to confirm the object landed in
 storage, not to re-validate it (see worker/document_worker/tasks.py).
 
+`enqueue_finalize_upload` is deliberately *not* called from here. This
+service runs inside the request's still-open DB transaction (`get_db`
+only commits after the route handler returns); enqueueing from here would
+let a fast worker pick up the task and query for the document before
+Postgres has actually committed it — a real race that surfaced under
+live testing. The controller schedules the enqueue via FastAPI
+`BackgroundTasks` instead, which only run after the response (and the
+`get_db` dependency's commit) have already completed.
+
 Uploading/deleting/restoring a document keeps `Repository.document_count`
 and `.storage_used_bytes` in sync — this is the one statistic Phase 4
 actually populates for real, since it's the phase that creates documents;
@@ -18,7 +27,6 @@ from datetime import UTC, datetime
 from app.core.document_validation import compute_sha256, validate_upload
 from app.core.exceptions import ConflictError
 from app.core.storage_adapter import StorageAdapter
-from app.core.task_queue import enqueue_finalize_upload
 from app.models.audit_log import AuditLog
 from app.models.document import (
     Document,
@@ -132,7 +140,6 @@ class DocumentService:
             user_id=uploader_id, action="document.upload", resource=str(document.id)
         )
 
-        enqueue_finalize_upload(str(document.id))
         return document
 
     async def create_new_version(
@@ -188,7 +195,6 @@ class DocumentService:
             user_id=actor_id, action="document.new_version", resource=str(document.id)
         )
 
-        enqueue_finalize_upload(str(document.id))
         return document
 
     async def list_by_repository(self, repository_id: uuid.UUID) -> list[Document]:
