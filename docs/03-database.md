@@ -309,7 +309,69 @@ grant ongoing workspace access.
 
 # 15. Document Schema
 
-**Pending — Document Processing phase (after Phase 3).**
+Implemented in `backend/app/models/document.py`, migration `0005_add_document_tables`.
+
+```
+documents
+  id                      UUID PK
+  repository_id           UUID FK -> repositories.id, ON DELETE CASCADE, indexed
+  filename                varchar(500)
+  mime_type               varchar(255)
+  size_bytes              bigint
+  sha256_hash             varchar(64), indexed  -- dedup key within a repository
+  storage_key             varchar(1000)         -- object key: documents/{repo}/{doc}/v{n}/{filename}
+  status                  enum(document_status)  -- see state machine below
+  status_message          varchar(500), nullable -- populated on any failed_* status
+  current_version         int, default 1
+  language                varchar(10), nullable  -- populated by a later (parsing) phase
+  page_count              int, nullable          -- populated by a later (parsing) phase
+  uploaded_by             UUID FK -> users.id, ON DELETE SET NULL, nullable
+  created_at / updated_at timestamptz
+  deleted_at              timestamptz, nullable
+  created_by / updated_by UUID, nullable
+
+document_versions
+  id            UUID PK
+  document_id   UUID FK -> documents.id, ON DELETE CASCADE, indexed
+  version       int
+  filename / mime_type / size_bytes / sha256_hash / storage_key  -- own copy, immutable snapshot
+  status        enum(document_status)
+  created_at    timestamptz
+  created_by    UUID FK -> users.id, ON DELETE SET NULL, nullable
+  UNIQUE(document_id, version)  -- uq_document_version
+
+upload_sessions
+  id             UUID PK
+  repository_id  UUID FK -> repositories.id, ON DELETE CASCADE, indexed
+  user_id        UUID FK -> users.id, ON DELETE SET NULL, nullable
+  document_id    UUID FK -> documents.id, ON DELETE SET NULL, nullable
+  filename       varchar(500)
+  status         enum(upload_session_status: pending, completed, failed)
+  error_message  varchar(1000), nullable
+  created_at / updated_at timestamptz
+```
+
+`document_status` state machine (docs/02-architecture.md section 46): `uploaded -> validating ->
+validated -> parsing -> ocr -> cleaning -> chunking -> embedding -> indexing -> ready`, with a
+parallel `failed_upload` / `failed_validation` / `failed_parse` / `failed_ocr` / `failed_chunk` /
+`failed_embed` / `failed_index` at each stage. Only `uploaded` / `validating` / `validated` /
+`failed_validation` are reachable today — the backend validates and stores the file synchronously
+(size/extension/password-protection/virus-scan-stub, `backend/app/core/document_validation.py`),
+then enqueues `document_worker.finalize_upload` (`worker/document_worker/tasks.py`) which confirms
+the object actually landed in MinIO and flips `uploaded -> validated` (or `failed_validation`).
+Parsing/OCR/chunking/embedding/indexing continue this same state machine in later phases.
+
+`DocumentVersion` is **not** given `TimestampMixin` — each row is an immutable snapshot of one
+upload, so it owns a plain `created_at`/`created_by` rather than a mutable `updated_at`.
+
+Uploading, soft-deleting, and restoring a document keep `Repository.document_count` and
+`.storage_used_bytes` in sync (`DocumentService._bump_repository_stats`, floored at zero) — this
+is the one set of repository statistics actually populated today; `chunk_count` /
+`embedding_count` / `retrieval_count` remain zero until their phases exist.
+
+Duplicate detection is per-repository, by `sha256_hash` (`get_by_hash_in_repository`) — uploading
+identical bytes into the same repository is rejected with `DUPLICATE_DOCUMENT`; the same bytes in
+two different repositories are unrelated documents.
 
 # 16. Chunk Schema
 

@@ -28,11 +28,26 @@ class Settings(BaseSettings):
     redis_url: str = "redis://localhost:6379/0"
 
     # Object storage
+    storage_backend: str = "minio"  # "minio" | "local"
     minio_endpoint: str = "localhost:9000"
     minio_access_key: str = "ragadmin"
     minio_secret_key: str = "ragadminsecret"
     minio_bucket: str = "rag-documents"
     minio_secure: bool = False
+    local_storage_path: str = "./data/storage"
+
+    # Documents
+    max_upload_size_bytes: int = 500 * 1024 * 1024  # 500 MB, per docs/01-project.md
+    allowed_upload_extensions: list[str] = [
+        "pdf",
+        "docx",
+        "txt",
+        "md",
+        "csv",
+        "html",
+        "json",
+        "xml",
+    ]
 
     # Auth
     jwt_secret_key: str = "change-me-in-production"

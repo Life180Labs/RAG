@@ -6,6 +6,7 @@ import os
 # Settings are read (and cached) at first import.
 os.environ.setdefault("DATABASE_URL", "postgresql+asyncpg://rag:rag@localhost:5433/rag")
 os.environ.setdefault("REDIS_URL", "redis://localhost:6380/0")
+os.environ.setdefault("MINIO_ENDPOINT", "localhost:9002")
 # Exposes the dev-only reset_token in /auth/forgot-password responses so
 # tests can exercise the reset flow without a real mail sender.
 os.environ.setdefault("DEBUG", "true")
@@ -17,9 +18,19 @@ import pytest_asyncio
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import text
 
+from app.core.config import get_settings
 from app.core.redis import get_redis_client
+from app.core.storage import ensure_bucket_exists, get_storage_client
 from app.db.session import AsyncSessionLocal
 from app.main import app
+
+
+@pytest.fixture(scope="session", autouse=True)
+def _ensure_storage_bucket():
+    # httpx's ASGITransport doesn't run the app's lifespan (where this
+    # normally happens on real startup), so document upload tests would
+    # otherwise hit a real "NoSuchBucket" error from MinIO.
+    ensure_bucket_exists(get_storage_client(), get_settings().minio_bucket)
 
 
 @pytest.fixture(scope="session")

@@ -17,6 +17,16 @@ class WorkerSettings(BaseSettings):
     log_level: str = "INFO"
     redis_url: str = "redis://localhost:6379/0"
 
+    # Sync driver (psycopg3), distinct from the backend's async asyncpg URL —
+    # Celery's prefork workers run task bodies synchronously.
+    database_url: str = "postgresql+psycopg://rag:rag@localhost:5432/rag"
+
+    minio_endpoint: str = "localhost:9000"
+    minio_access_key: str = "ragadmin"
+    minio_secret_key: str = "ragadminsecret"
+    minio_bucket: str = "rag-documents"
+    minio_secure: bool = False
+
 
 @lru_cache
 def get_worker_settings() -> WorkerSettings:

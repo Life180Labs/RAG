@@ -209,13 +209,46 @@ vector search (no documents are indexed yet).
 
 # 8. Document APIs
 
-**Pending — Document Processing phase.**
+Implemented (`backend/app/api/v1/documents.py`). Documents are created/listed under their
+repository but addressed by their own `document_id` afterward. Upload routes require repository
+ADMIN+ (matching the create-requires-parent-ADMIN pattern used throughout the tenancy hierarchy);
+reads require VIEWER+; delete/restore require ADMIN+.
+
+| Method | Path                                              | Min role | Purpose |
+|--------|----------------------------------------------------|----------|---------|
+| GET    | `/api/v1/repositories/{repository_id}/documents`    | Repository VIEWER | List (excludes soft-deleted) |
+| GET    | `/api/v1/documents/{document_id}`                   | Document VIEWER | Get one |
+| GET    | `/api/v1/documents/{document_id}/versions`          | Document VIEWER | List versions, newest first |
+| DELETE | `/api/v1/documents/{document_id}`                   | Document ADMIN | Soft delete; decrements repository stats |
+| POST   | `/api/v1/documents/{document_id}/restore`            | Document ADMIN | Restore a soft-deleted document; re-increments stats |
+| GET    | `/api/v1/documents/{document_id}/download`           | Document VIEWER | Presigned URL (MinIO) or streamed bytes (local storage) — see below |
+
+`GET .../download` returns `SuccessResponse<{url, stream_via_backend}>` when a presigned URL is
+available (`url` set, `stream_via_backend: false`); when the storage backend can't produce one
+(local-filesystem dev mode), it instead responds with the raw file as a `StreamingResponse`
+(`Content-Disposition: attachment`) — callers must check the response `Content-Type` rather than
+always parsing JSON.
 
 # 9. Upload APIs
 
-**Pending — Document Processing phase.** Contract will match docs/02-architecture.md section 22:
-`POST /api/v1/documents/upload` returns `{"document_id": "...", "status": "processing"}`
-immediately; processing happens asynchronously via workers.
+Implemented (`backend/app/api/v1/documents.py`), synchronous multipart upload — not the
+fire-and-forget `POST /api/v1/documents/upload` contract originally sketched in
+docs/02-architecture.md section 22. The backend validates and stores the file *before* responding
+(size/extension/password-protection/virus-scan-stub, `backend/app/core/document_validation.py`),
+then enqueues `document_worker.finalize_upload` to confirm the object landed in storage; the
+response already reflects the created `Document` row (`status: "uploaded"`), not a bare
+`processing` placeholder.
+
+| Method | Path                                                    | Min role | Purpose |
+|--------|-----------------------------------------------------------|----------|---------|
+| POST   | `/api/v1/repositories/{repository_id}/documents`            | Repository ADMIN | Upload a new document (multipart, field name `file`) |
+| POST   | `/api/v1/documents/{document_id}/versions`                  | Document ADMIN | Upload a new version of an existing document |
+
+Validation order: extension allowlist (`pdf, docx, txt, md, csv, html, json, xml`) → size (empty
+or over `max_upload_size_bytes`, 500 MB) → PDF password-protection (via `pypdf`; other formats are
+not checked) → virus scan (documented no-op stub, always passes — swap in a real scanner later
+without touching call sites). Duplicate detection is by `sha256_hash` within the same repository
+(`DUPLICATE_DOCUMENT`, 409) — re-uploading identical bytes elsewhere is not blocked.
 
 # 10. Parsing APIs
 
@@ -342,6 +375,21 @@ Repository-specific (Phase 3):
 
 (`NOT_A_MEMBER`, `OWNER_REQUIRED`, and `SLUG_TAKEN` are reused from the Phase 2 table above —
 repositories follow the identical org/workspace/project RBAC and slug-uniqueness pattern.)
+
+Document-specific (Phase 4):
+
+| Code                    | HTTP Status | Meaning |
+|--------------------------|-------------|---------|
+| `DOCUMENT_NOT_FOUND`      | 404         | Document doesn't exist or is soft-deleted |
+| `DUPLICATE_DOCUMENT`      | 409         | Identical `sha256_hash` already exists in this repository |
+| `UNSUPPORTED_EXTENSION`   | 400         | File extension not in the allowlist |
+| `FILE_TOO_LARGE`          | 400         | File exceeds `max_upload_size_bytes` (500 MB) |
+| `EMPTY_FILE`              | 400         | Uploaded file is zero bytes |
+| `PASSWORD_PROTECTED_FILE` | 400         | PDF is encrypted (detected via `pypdf`) |
+| `VIRUS_DETECTED`          | 400         | Reserved for when `scan_for_viruses` becomes a real scanner (always passes today) |
+
+(`NOT_A_MEMBER` and repository-role checks are reused as-is; a document's membership is resolved
+via its `repository_id`, not a separate document-level membership table.)
 
 Domain-specific codes (e.g. `DOCUMENT_NOT_FOUND`) are added by raising a subclass of `AppError`
 (`backend/app/core/exceptions.py`) with a specific `code` as each domain is implemented — never

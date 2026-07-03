@@ -6,6 +6,8 @@ import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
+import { DocumentList } from '@/components/documents/document-list';
+import { DocumentUpload } from '@/components/documents/document-upload';
 import { RepositorySettingsForm } from '@/components/tenancy/repository-settings-form';
 import { useRepository, useRepositoryActivity } from '@/hooks/use-repositories';
 import type { Repository } from '@/types/repository';
@@ -82,6 +84,16 @@ export function RepositoryDashboard({
               </div>
             ))}
           </dl>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Documents</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <DocumentUpload repositoryId={repositoryId} />
+          <DocumentList repositoryId={repositoryId} />
         </CardContent>
       </Card>
 
