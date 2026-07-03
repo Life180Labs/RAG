@@ -9,7 +9,7 @@ from app.core.config import get_settings
 from app.models.base import Base
 
 # Import all model modules here so Base.metadata is fully populated for autogenerate.
-# from app.models import organization, workspace, project  # noqa: F401 (added per phase)
+from app.models import audit_log, session, user  # noqa: F401
 
 config = context.config
 

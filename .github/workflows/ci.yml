@@ -17,6 +17,33 @@ jobs:
     defaults:
       run:
         working-directory: backend
+    services:
+      postgres:
+        image: pgvector/pgvector:pg16
+        env:
+          POSTGRES_USER: rag
+          POSTGRES_PASSWORD: rag
+          POSTGRES_DB: rag
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U rag -d rag"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      DATABASE_URL: postgresql+asyncpg://rag:rag@localhost:5432/rag
+      REDIS_URL: redis://localhost:6379/0
+      DEBUG: "true"
     steps:
       - uses: actions/checkout@v4
 
@@ -36,7 +63,10 @@ jobs:
         run: mypy app
         continue-on-error: true
 
-      - name: Unit tests
+      - name: Apply migrations
+        run: alembic upgrade head
+
+      - name: Unit + integration tests
         run: pytest --cov=app --cov-report=term-missing
 
   worker:

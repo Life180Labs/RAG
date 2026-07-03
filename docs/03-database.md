@@ -143,7 +143,28 @@ implemented starting with the phases that introduce those entities.
 
 # 13. User Schema
 
-**Pending — Phase 1.**
+Implemented in `backend/app/models/user.py`, migration
+`backend/alembic/versions/20260703_0002_add_auth_tables.py`.
+
+```
+users
+  id                      UUID PK
+  email                   varchar(320) UNIQUE, indexed
+  hashed_password         varchar(255)          -- argon2 (passlib)
+  full_name               varchar(255)
+  role                    enum(admin, developer, researcher, viewer) -- global for Phase 1;
+                                                                       -- becomes per-tenant in Phase 2
+  is_active               boolean
+  failed_login_attempts   int
+  locked_until            timestamptz, nullable  -- account lockout (5 failures -> 15 min)
+  last_login_at           timestamptz, nullable
+  created_at / updated_at timestamptz
+  deleted_at              timestamptz, nullable  -- soft delete
+```
+
+New accounts default to `role = viewer`. Organization/workspace/project-scoped roles are added in
+Phase 2 without breaking this table (a global role remains a sane default for users outside any
+organization context).
 
 # 14. Workspace Schema
 
@@ -195,7 +216,22 @@ implemented starting with the phases that introduce those entities.
 
 # 26. Audit Schema
 
-**Pending — Phase 1 (Authentication/Security).**
+Implemented in `backend/app/models/audit_log.py`. Immutable/append-only: no `updated_at`, no
+soft delete, per docs/06-rule.md.
+
+```
+audit_logs
+  id           UUID PK
+  user_id      UUID FK -> users.id, ON DELETE SET NULL, nullable, indexed
+  action       varchar(100), indexed              -- e.g. "login", "register", "password_reset"
+  resource     varchar(255), nullable
+  ip_address   varchar(64), nullable
+  result       varchar(20)                          -- "success" | "failure" | "locked"
+  created_at   timestamptz, indexed
+```
+
+Written by `AuthService` for register/login (success and failure)/logout/password_reset. Broader
+audit coverage (permission changes, uploads, deletes) expands as those features ship.
 
 # 27. API Keys Schema
 
@@ -203,7 +239,27 @@ implemented starting with the phases that introduce those entities.
 
 # 28. Session Schema
 
-**Pending — Phase 1.**
+Implemented in `backend/app/models/session.py`. One row per issued refresh token; refresh
+rotates the row's hash in place rather than inserting a new row.
+
+```
+sessions
+  id                  UUID PK
+  user_id             UUID FK -> users.id, ON DELETE CASCADE, indexed
+  refresh_token_hash  varchar(255) UNIQUE            -- sha256(raw refresh token); raw token
+                                                        never stored
+  device              varchar(255), nullable
+  ip_address          varchar(64), nullable
+  user_agent          varchar(512), nullable
+  last_activity_at    timestamptz
+  expires_at          timestamptz
+  revoked_at          timestamptz, nullable          -- set on logout
+  created_at / updated_at timestamptz
+```
+
+Password-reset tokens are intentionally *not* stored here — they're single-use, short-TTL
+(30 min), and live only in Redis (`password_reset:<sha256(token)> -> user_id`) so a stolen
+reset token can't be replayed and never touches durable storage.
 
 # 29. Notification Schema
 
@@ -226,8 +282,8 @@ Mandatory indexes, per docs/06-rule.md Database Rules:
   audit logs).
 * HNSW index on every `vector` column once embedding tables exist.
 
-No index has been added yet beyond the implicit primary-key index, since no domain tables exist
-before Phase 1.
+Applied so far: `users.email` (unique), `sessions.user_id`, `audit_logs.user_id`,
+`audit_logs.action`, `audit_logs.created_at` (see migration `0002_add_auth_tables`).
 
 ---
 
