@@ -1,0 +1,8 @@
+# Default owners for everything in the repo.
+# Replace with real team handles as the org is set up.
+*                       @Life180Labs
+
+/backend/               @Life180Labs
+/frontend/               @Life180Labs
+/worker/                 @Life180Labs
+/docs/                   @Life180Labs

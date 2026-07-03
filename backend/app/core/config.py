@@ -1,0 +1,46 @@
+"""Centralized application settings loaded from environment variables.
+
+Never hardcode secrets or connection strings elsewhere; every module that
+needs configuration must depend on `Settings` via `get_settings()`.
+"""
+
+from functools import lru_cache
+
+from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+class Settings(BaseSettings):
+    model_config = SettingsConfigDict(env_file=".env", env_file_encoding="utf-8", extra="ignore")
+
+    # Application
+    app_env: str = "local"
+    debug: bool = False
+    log_level: str = "INFO"
+    api_v1_prefix: str = "/api/v1"
+    cors_origins: list[str] = ["http://localhost:3000"]
+
+    # Database
+    database_url: str = "postgresql+asyncpg://rag:rag@localhost:5432/rag"
+    database_pool_size: int = 10
+    database_max_overflow: int = 20
+
+    # Redis
+    redis_url: str = "redis://localhost:6379/0"
+
+    # Object storage
+    minio_endpoint: str = "localhost:9000"
+    minio_access_key: str = "ragadmin"
+    minio_secret_key: str = "ragadminsecret"
+    minio_bucket: str = "rag-documents"
+    minio_secure: bool = False
+
+    # Auth
+    jwt_secret_key: str = "change-me-in-production"
+    jwt_algorithm: str = "HS256"
+    access_token_expire_minutes: int = 15
+    refresh_token_expire_days: int = 7
+
+
+@lru_cache
+def get_settings() -> Settings:
+    return Settings()
