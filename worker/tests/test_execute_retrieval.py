@@ -51,21 +51,29 @@ def _insert_document_with_content(repository_id, uploader_id) -> uuid.UUID:
     return document_id
 
 
-def _build_pgvector_index(document_id: uuid.UUID) -> tuple[str, str]:
+def _build_pgvector_index(
+    document_id: uuid.UUID, strategy: str = "structural", split_chunks: bool = False
+) -> tuple[str, str]:
     """Runs chunk -> embed -> index for one document and returns
     (vector_index_id, document_id) for the pgvector index built."""
-    chunk_document.run(str(document_id), "structural")
+    chunk_document.run(str(document_id), strategy)
     with SessionLocal() as session:
         chunk_set = session.execute(
             text("SELECT id FROM document_chunk_sets WHERE document_id = :id"),
             {"id": document_id},
         ).first()
-        embed_chunk_set.run(str(chunk_set.id), "bge")
+        chunk_set_id = chunk_set.id
+
+    if split_chunks:
+        _split_chunk_set_into_two(chunk_set_id)
+
+    with SessionLocal() as session:
+        embed_chunk_set.run(str(chunk_set_id), "bge")
         version = session.execute(
             text(
                 "SELECT id FROM embedding_versions WHERE chunk_set_id = :id AND provider = 'bge'"
             ),
-            {"id": chunk_set.id},
+            {"id": chunk_set_id},
         ).first()
         embedding_version_id = str(version.id)
 
@@ -93,6 +101,11 @@ def _insert_retrieval(vector_index_id: str, document_id: uuid.UUID, **overrides)
         "score_threshold": None,
         "similarity_metric": "COSINE",
         "metadata_filter": None,
+        "retrieval_mode": "DENSE",
+        "fusion_method": None,
+        "dense_weight": None,
+        "sparse_weight": None,
+        "rrf_k": None,
         "status": "PENDING",
         "result_count": 0,
         **overrides,
@@ -102,9 +115,12 @@ def _insert_retrieval(vector_index_id: str, document_id: uuid.UUID, **overrides)
             text(
                 "INSERT INTO retrievals "
                 "(id, vector_index_id, document_id, query_text, top_k, score_threshold, "
-                "similarity_metric, metadata_filter, status, result_count, created_at, updated_at) "
+                "similarity_metric, metadata_filter, retrieval_mode, fusion_method, "
+                "dense_weight, sparse_weight, rrf_k, status, result_count, created_at, "
+                "updated_at) "
                 "VALUES (:id, :vector_index_id, :document_id, :query_text, :top_k, "
                 ":score_threshold, :similarity_metric, CAST(:metadata_filter AS jsonb), "
+                ":retrieval_mode, :fusion_method, :dense_weight, :sparse_weight, :rrf_k, "
                 ":status, :result_count, now(), now())"
             ),
             {**fields, "metadata_filter": json.dumps(fields["metadata_filter"])
@@ -176,3 +192,156 @@ def test_execute_retrieval_rejects_unsupported_metric_for_external_provider(docu
 def test_execute_retrieval_skips_when_retrieval_not_found():
     result = execute_retrieval.run(str(uuid.uuid4()))
     assert result == {"status": "skipped", "reason": "retrieval_not_found"}
+
+
+_HYBRID_BLOCKS = [
+    {"type": "heading", "text": "Error Codes", "level": 1, "page": None},
+    {
+        "type": "paragraph",
+        "text": "Error code XJ-9042 indicates a checkout timeout in the payment gateway.",
+        "level": None,
+        "page": None,
+    },
+    {
+        "type": "paragraph",
+        "text": "Vector databases support cosine similarity search over embeddings.",
+        "level": None,
+        "page": None,
+    },
+]
+
+
+_SPLIT_CHUNK_TEXTS = [
+    "Error code XJ-9042 indicates a checkout timeout in the payment gateway.",
+    "Vector databases support cosine similarity search over embeddings.",
+    "Enterprise software licensing agreements and compliance requirements.",
+    "The weather forecast predicts rain for the entire weekend.",
+    "A simple recipe for baking sourdough bread at home.",
+    "Quarterly financial results exceeded analyst expectations this year.",
+]
+
+
+def _split_chunk_set_into_two(chunk_set_id) -> None:
+    """The real chunkers merge short test paragraphs below max_tokens
+    into a single chunk regardless of strategy, but BM25's IDF is
+    degenerate over a corpus of only one or two documents (a query
+    term appearing in exactly half of a 2-document corpus gets an
+    exact-zero IDF — see bm25.py's docstring and test_bm25.py) — so for
+    hybrid-fusion tests specifically, replace the one generated chunk
+    with several distractor chunks plus the two real source sentences,
+    giving BM25 a corpus large enough for a real, non-degenerate score.
+    """
+    with SessionLocal() as session:
+        chunk = session.execute(
+            text(
+                "SELECT id FROM chunks WHERE chunk_set_id = :id ORDER BY chunk_index LIMIT 1"
+            ),
+            {"id": chunk_set_id},
+        ).first()
+        session.execute(
+            text("UPDATE chunks SET text = :text, char_start = 0, char_end = 73 WHERE id = :id"),
+            {"id": chunk.id, "text": _SPLIT_CHUNK_TEXTS[0]},
+        )
+        for index, chunk_text in enumerate(_SPLIT_CHUNK_TEXTS[1:], start=1):
+            session.execute(
+                text(
+                    "INSERT INTO chunks (id, chunk_set_id, chunk_index, text, char_start, "
+                    "char_end, token_count, page, heading, language, status) "
+                    "VALUES (gen_random_uuid(), :chunk_set_id, :chunk_index, :text, 0, "
+                    "100, 12, NULL, NULL, 'en', 'READY')"
+                ),
+                {"chunk_set_id": chunk_set_id, "chunk_index": index, "text": chunk_text},
+            )
+        session.execute(
+            text(
+                "UPDATE document_chunk_sets SET chunk_count = :count WHERE id = :id"
+            ),
+            {"id": chunk_set_id, "count": len(_SPLIT_CHUNK_TEXTS)},
+        )
+        session.commit()
+
+
+def _insert_document_with_hybrid_content(repository_id, uploader_id) -> uuid.UUID:
+    document_id = uuid.uuid4()
+    with SessionLocal() as session:
+        session.execute(
+            text(
+                "INSERT INTO documents (id, repository_id, filename, mime_type, size_bytes, "
+                "sha256_hash, storage_key, status, current_version, uploaded_by) "
+                "VALUES (:id, :repository_id, 'b.txt', 'text/plain', 10, 'y', 'k', "
+                "'CHUNKING', 1, :uploaded_by)"
+            ),
+            {"id": document_id, "repository_id": repository_id, "uploaded_by": uploader_id},
+        )
+        session.execute(
+            text(
+                "INSERT INTO document_content (id, document_id, version, raw_text, "
+                "structured_content, parser_used, ocr_used, created_at, updated_at) "
+                "VALUES (gen_random_uuid(), :document_id, 1, 'raw', CAST(:blocks AS jsonb), "
+                "'native', false, now(), now())"
+            ),
+            {"document_id": document_id, "blocks": json.dumps(_HYBRID_BLOCKS)},
+        )
+        session.commit()
+    return document_id
+
+
+def test_execute_retrieval_hybrid_weighted_sum_populates_component_scores(document_chain):
+    document_id = _insert_document_with_hybrid_content(
+        document_chain["repository_id"], document_chain["user_id"]
+    )
+    vector_index_id = _build_pgvector_index(document_id, split_chunks=True)
+    retrieval_id = _insert_retrieval(
+        vector_index_id,
+        document_id,
+        query_text="XJ-9042 checkout error",
+        retrieval_mode="HYBRID",
+        fusion_method="WEIGHTED_SUM",
+        dense_weight=0.7,
+        sparse_weight=0.3,
+    )
+
+    result = execute_retrieval.run(retrieval_id)
+    assert result["status"] == "completed"
+    assert result["result_count"] > 0
+
+    with SessionLocal() as session:
+        rows = session.execute(
+            text(
+                "SELECT rank, score, dense_score, sparse_score FROM retrieval_results "
+                "WHERE retrieval_id = :id ORDER BY rank"
+            ),
+            {"id": retrieval_id},
+        ).all()
+        assert rows[0].dense_score is not None
+        # The top BM25-favored chunk (exact "XJ-9042" match) should be
+        # ranked first — dense alone (a generic small local model on a
+        # tiny corpus) has no reason to prefer it, so this only holds if
+        # the sparse side is genuinely contributing to the fused score.
+        assert rows[0].sparse_score is not None and rows[0].sparse_score > 0
+
+
+def test_execute_retrieval_hybrid_rrf(document_chain):
+    document_id = _insert_document_with_hybrid_content(
+        document_chain["repository_id"], document_chain["user_id"]
+    )
+    vector_index_id = _build_pgvector_index(document_id, split_chunks=True)
+    retrieval_id = _insert_retrieval(
+        vector_index_id,
+        document_id,
+        query_text="cosine similarity embeddings",
+        retrieval_mode="HYBRID",
+        fusion_method="RRF",
+        rrf_k=60,
+    )
+
+    result = execute_retrieval.run(retrieval_id)
+    assert result["status"] == "completed"
+
+    with SessionLocal() as session:
+        row = session.execute(
+            text("SELECT retrieval_mode, fusion_method FROM retrievals WHERE id = :id"),
+            {"id": retrieval_id},
+        ).first()
+        assert row.retrieval_mode == "HYBRID"
+        assert row.fusion_method == "RRF"

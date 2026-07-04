@@ -29,6 +29,7 @@ dependencies = [
     "pgvector==0.3.6",
     "qdrant-client==1.18.0",
     "chromadb-client==1.5.9",
+    "rank-bm25==0.2.2",
 ]
 
 [project.optional-dependencies]
@@ -52,4 +53,4 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
-include = ["common*", "document_worker*", "chunk_worker*", "embedding_worker*", "retrieval_worker*", "evaluation_worker*", "benchmark_worker*", "scheduler*"]
+include = ["common*", "document_worker*", "chunk_worker*", "embedding_worker*", "index_worker*", "retrieval_worker*", "evaluation_worker*", "benchmark_worker*", "scheduler*"]

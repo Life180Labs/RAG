@@ -698,7 +698,11 @@ vectors in an external store, so the worker must reach that store first.
 
 # 19. Retrieval Schema
 
-Implemented in `backend/app/models/retrieval.py`, migration `0010_add_retrieval_tables`.
+Implemented in `backend/app/models/retrieval.py`, migrations `0010_add_retrieval_tables` (Phase 9,
+dense retrieval) and `0011_add_hybrid_retrieval` (Phase 10, hybrid search — adds the
+`retrieval_mode`/`fusion_method`/`dense_weight`/`sparse_weight`/`rrf_k` columns on `retrievals` and
+`dense_score`/`sparse_score` on `retrieval_results`, all nullable so Phase 9's dense-only rows are
+unaffected).
 
 ```
 retrievals
@@ -710,6 +714,11 @@ retrievals
   score_threshold      float, nullable
   similarity_metric    enum(cosine, dot, euclidean), default cosine
   metadata_filter      jsonb, nullable                 -- exact-match filter on heading/page/language
+  retrieval_mode       enum(dense, hybrid), default dense
+  fusion_method        enum(weighted_sum, rrf), nullable   -- only set when retrieval_mode = hybrid
+  dense_weight         float, nullable                     -- only set for hybrid + weighted_sum
+  sparse_weight        float, nullable                     -- only set for hybrid + weighted_sum
+  rrf_k                integer, nullable                   -- only set for hybrid + rrf
   status               enum(pending, completed, failed)
   status_message       varchar(500), nullable
   result_count         integer, default 0
@@ -725,8 +734,35 @@ retrieval_results
   retrieval_id   UUID FK -> retrievals.id, ON DELETE CASCADE, indexed
   chunk_id       UUID FK -> chunks.id, ON DELETE CASCADE, indexed
   rank           integer                    -- 1-indexed position in the ranked result list
-  score          float                      -- normalized so higher is always better (see below)
+  score          float                      -- normalized so higher is always better (see below);
+                                             -- for hybrid retrievals, this is the *fused* score
+  dense_score    float, nullable            -- only populated for hybrid retrievals
+  sparse_score   float, nullable            -- only populated for hybrid retrievals
 ```
+
+**Phase 10 (hybrid search) extends this same model rather than introducing a parallel
+"HybridRetrieval" concept** — `retrieval_mode` distinguishes dense-only (Phase 9's original
+behavior, byte-for-byte unchanged) from hybrid (dense + BM25 sparse, fused).
+`worker/retrieval_worker/bm25.py` computes BM25 fresh per query directly over the target
+`vector_index`'s embedding version's `chunk_set`'s READY chunk texts via `rank_bm25` (a real
+BM25Okapi implementation), rather than maintaining a persisted inverted index — chunk sets in this
+system are individual documents, not a web-scale corpus, so re-tokenizing per query is fast and
+avoids a second index artifact that would need to stay in sync with chunk regeneration the same
+way vector indexes already must. A real, documented limitation of this choice: BM25's IDF is
+degenerate over very small corpora (a term appearing in exactly half of a 2-document corpus gets
+an exact-zero IDF; a 1-document corpus collapses entirely), so single-chunk documents will
+routinely produce a `null` `sparse_score` even for exact keyword matches — not a bug, a genuine
+property of the BM25 formula at that scale.
+
+`worker/retrieval_worker/fusion.py` implements both fusion methods task.md requires: **weighted
+sum** (min-max normalizes dense and sparse scores to `[0, 1]` first, since their raw scales are
+incomparable, then combines via `dense_weight`/`sparse_weight`, which the backend always
+normalizes to sum to 1 before storing) and **reciprocal rank fusion** (fuses by rank position
+instead of raw score — the standard approach systems like Elasticsearch's hybrid search use,
+sidestepping the scale problem entirely; `rrf_k` defaults to 60, the constant from the original RRF
+paper). Both retrievers are asked for a candidate pool of `max(top_k * 3, 20)` results — not just
+`top_k` — before fusion, per docs/02-architecture.md section 60's "never send only Top-K directly"
+guidance; the fused, re-ranked list is truncated to `top_k` only after fusion.
 
 A `Retrieval` always targets one `VectorIndex` (never a whole repository in a single call) — the
 same constraint `embedding.py` documents for indexing: pgvector's zero-padded columns make

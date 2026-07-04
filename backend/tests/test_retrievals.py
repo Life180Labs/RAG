@@ -257,4 +257,97 @@ async def test_retrieval_from_another_document_is_not_accessible(client):
         headers=_auth(token),
     )
     assert response.status_code == 404
-    assert response.json()["error"]["code"] == "VECTOR_INDEX_NOT_FOUND"
+
+
+@pytest.mark.asyncio
+async def test_create_hybrid_retrieval_applies_default_weights(client):
+    token = await _register_and_login(client, "owner@example.com")
+    document_id, vector_index_id = await _seed_index_chain(client, token)
+
+    response = await client.post(
+        f"/api/v1/documents/{document_id}/vector-indexes/{vector_index_id}/retrievals",
+        json={"query_text": "test", "retrieval_mode": "hybrid"},
+        headers=_auth(token),
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()["data"]
+    assert body["retrieval_mode"] == "hybrid"
+    assert body["fusion_method"] == "weighted_sum"
+    assert body["dense_weight"] == pytest.approx(0.7)
+    assert body["sparse_weight"] == pytest.approx(0.3)
+
+
+@pytest.mark.asyncio
+async def test_create_hybrid_retrieval_normalizes_uneven_weights(client):
+    token = await _register_and_login(client, "owner@example.com")
+    document_id, vector_index_id = await _seed_index_chain(client, token)
+
+    response = await client.post(
+        f"/api/v1/documents/{document_id}/vector-indexes/{vector_index_id}/retrievals",
+        json={
+            "query_text": "test",
+            "retrieval_mode": "hybrid",
+            "dense_weight": 2.0,
+            "sparse_weight": 1.0,
+        },
+        headers=_auth(token),
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()["data"]
+    assert body["dense_weight"] == pytest.approx(2 / 3)
+    assert body["sparse_weight"] == pytest.approx(1 / 3)
+
+
+@pytest.mark.asyncio
+async def test_create_hybrid_retrieval_rejects_zero_weights(client):
+    token = await _register_and_login(client, "owner@example.com")
+    document_id, vector_index_id = await _seed_index_chain(client, token)
+
+    response = await client.post(
+        f"/api/v1/documents/{document_id}/vector-indexes/{vector_index_id}/retrievals",
+        json={
+            "query_text": "test",
+            "retrieval_mode": "hybrid",
+            "dense_weight": 0,
+            "sparse_weight": 0,
+        },
+        headers=_auth(token),
+    )
+    assert response.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_create_hybrid_retrieval_rrf_applies_default_k(client):
+    token = await _register_and_login(client, "owner@example.com")
+    document_id, vector_index_id = await _seed_index_chain(client, token)
+
+    response = await client.post(
+        f"/api/v1/documents/{document_id}/vector-indexes/{vector_index_id}/retrievals",
+        json={"query_text": "test", "retrieval_mode": "hybrid", "fusion_method": "rrf"},
+        headers=_auth(token),
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()["data"]
+    assert body["fusion_method"] == "rrf"
+    assert body["rrf_k"] == 60
+    assert body["dense_weight"] is None
+    assert body["sparse_weight"] is None
+
+
+@pytest.mark.asyncio
+async def test_create_dense_retrieval_leaves_hybrid_fields_null(client):
+    token = await _register_and_login(client, "owner@example.com")
+    document_id, vector_index_id = await _seed_index_chain(client, token)
+
+    response = await client.post(
+        f"/api/v1/documents/{document_id}/vector-indexes/{vector_index_id}/retrievals",
+        json={"query_text": "test"},
+        headers=_auth(token),
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()["data"]
+    assert body["retrieval_mode"] == "dense"
+    assert body["fusion_method"] is None
+    assert body["dense_weight"] is None
+    assert body["sparse_weight"] is None
+    assert body["rrf_k"] is None

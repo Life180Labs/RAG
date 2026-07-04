@@ -365,7 +365,7 @@ VIEWER+.
 
 | Method | Path | Auth | Notes |
 |--------|------|----------|---------|
-| POST   | `/api/v1/documents/{document_id}/vector-indexes/{vector_index_id}/retrievals` | Document VIEWER | Run a dense retrieval query; body `{"query_text": "...", "top_k": 10, "score_threshold": null, "similarity_metric": "cosine", "metadata_filter": null}` (only `query_text` required) |
+| POST   | `/api/v1/documents/{document_id}/vector-indexes/{vector_index_id}/retrievals` | Document VIEWER | Run a retrieval query; body `{"query_text": "...", "top_k": 10, "score_threshold": null, "similarity_metric": "cosine", "metadata_filter": null, "retrieval_mode": "dense", "fusion_method": null, "dense_weight": null, "sparse_weight": null, "rrf_k": null}` (only `query_text` required) |
 | GET    | `/api/v1/documents/{document_id}/vector-indexes/{vector_index_id}/retrievals` | Document VIEWER | List past retrievals against this index, most recent first; `?limit=50&offset=0` |
 | GET    | `/api/v1/documents/{document_id}/vector-indexes/{vector_index_id}/retrievals/{retrieval_id}` | Document VIEWER | Get one retrieval's status and aggregate stats |
 | GET    | `/api/v1/documents/{document_id}/vector-indexes/{vector_index_id}/retrievals/{retrieval_id}/results` | Document VIEWER | Get the ranked candidate list (chunk text, heading, page, rank, score) |
@@ -389,6 +389,20 @@ Phase 8 attaches to every chunk at index build time) — e.g. `{"language": "en"
 
 `score` in the results response is always normalized so *higher is better* regardless of metric —
 see docs/03-database.md section 19.
+
+**Hybrid search (Phase 10)**: `retrieval_mode` accepts `dense` (default) or `hybrid`. For `hybrid`,
+`fusion_method` accepts `weighted_sum` (default if omitted) or `rrf`:
+
+- `weighted_sum`: `dense_weight`/`sparse_weight` default to `0.7`/`0.3`
+  (docs/02-architecture.md section 58's example) if omitted, and are always normalized to sum to 1
+  before being stored (e.g. `{"dense_weight": 2, "sparse_weight": 1}` is stored as `0.667`/`0.333`)
+  — both cannot be zero (`422`).
+- `rrf`: `rrf_k` defaults to `60` if omitted.
+
+The results response gains `dense_score`/`sparse_score` alongside the existing (now fused, for
+hybrid) `score` — either can be `null` for a given chunk (a chunk with no BM25 term overlap has no
+`sparse_score`; see docs/03-database.md section 19 for the small-corpus BM25 caveat). Dense-only
+retrievals leave every hybrid-specific field `null`, exactly as before Phase 10.
 
 # 16. Reranking APIs
 

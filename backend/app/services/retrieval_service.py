@@ -62,6 +62,11 @@ class RetrievalService:
                 score_threshold=payload.score_threshold,
                 similarity_metric=payload.similarity_metric,
                 metadata_filter=payload.metadata_filter,
+                retrieval_mode=payload.retrieval_mode,
+                fusion_method=payload.fusion_method,
+                dense_weight=payload.dense_weight,
+                sparse_weight=payload.sparse_weight,
+                rrf_k=payload.rrf_k,
                 status=RetrievalStatus.PENDING,
                 created_by=actor_id,
             )

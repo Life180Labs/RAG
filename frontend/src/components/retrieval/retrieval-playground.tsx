@@ -13,7 +13,14 @@ import {
   useRetrievals,
 } from '@/hooks/use-retrievals';
 import { ApiRequestError } from '@/services/api-client';
-import { SIMILARITY_METRICS, type RetrievalStatus, type SimilarityMetric } from '@/types/retrieval';
+import {
+  FUSION_METHODS,
+  SIMILARITY_METRICS,
+  type FusionMethod,
+  type RetrievalMode,
+  type RetrievalStatus,
+  type SimilarityMetric,
+} from '@/types/retrieval';
 
 function statusVariant(status: RetrievalStatus): 'default' | 'secondary' | 'destructive' {
   if (status === 'failed') return 'destructive';
@@ -31,6 +38,10 @@ export function RetrievalPlayground({
   const [queryText, setQueryText] = useState('');
   const [topK, setTopK] = useState(10);
   const [metric, setMetric] = useState<SimilarityMetric>('cosine');
+  const [mode, setMode] = useState<RetrievalMode>('dense');
+  const [fusionMethod, setFusionMethod] = useState<FusionMethod>('weighted_sum');
+  const [denseWeight, setDenseWeight] = useState(0.7);
+  const [rrfK, setRrfK] = useState(60);
   const [error, setError] = useState<string | null>(null);
   const [activeRetrievalId, setActiveRetrievalId] = useState<string | null>(null);
   const [showInspector, setShowInspector] = useState(false);
@@ -53,6 +64,15 @@ export function RetrievalPlayground({
         query_text: queryText,
         top_k: topK,
         similarity_metric: metric,
+        retrieval_mode: mode,
+        ...(mode === 'hybrid'
+          ? {
+              fusion_method: fusionMethod,
+              ...(fusionMethod === 'weighted_sum'
+                ? { dense_weight: denseWeight, sparse_weight: 1 - denseWeight }
+                : { rrf_k: rrfK }),
+            }
+          : {}),
       });
       setActiveRetrievalId(response.data.id);
     } catch (err) {
@@ -106,9 +126,79 @@ export function RetrievalPlayground({
         </Button>
       </div>
 
+      <div className="flex flex-wrap items-center gap-2" data-testid="hybrid-search-dashboard">
+        <div className="flex items-center gap-1 text-sm">
+          <button
+            type="button"
+            className={`h-8 rounded-lg border px-3 ${mode === 'dense' ? 'bg-primary text-primary-foreground' : 'border-input bg-transparent'}`}
+            onClick={() => setMode('dense')}
+            data-testid="retrieval-mode-dense"
+          >
+            Dense
+          </button>
+          <button
+            type="button"
+            className={`h-8 rounded-lg border px-3 ${mode === 'hybrid' ? 'bg-primary text-primary-foreground' : 'border-input bg-transparent'}`}
+            onClick={() => setMode('hybrid')}
+            data-testid="retrieval-mode-hybrid"
+          >
+            Hybrid
+          </button>
+        </div>
+
+        {mode === 'hybrid' && (
+          <>
+            <select
+              className="border-input h-8 rounded-lg border bg-transparent px-2 text-sm"
+              value={fusionMethod}
+              onChange={(event) => setFusionMethod(event.target.value as FusionMethod)}
+              data-testid="retrieval-fusion-method-select"
+            >
+              {FUSION_METHODS.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+
+            {fusionMethod === 'weighted_sum' && (
+              <label className="flex items-center gap-2 text-xs">
+                <span className="text-muted-foreground">
+                  dense {denseWeight.toFixed(2)} / sparse {(1 - denseWeight).toFixed(2)}
+                </span>
+                <input
+                  type="range"
+                  min={0}
+                  max={1}
+                  step={0.05}
+                  value={denseWeight}
+                  onChange={(event) => setDenseWeight(Number(event.target.value))}
+                  data-testid="retrieval-weight-slider"
+                />
+              </label>
+            )}
+
+            {fusionMethod === 'rrf' && (
+              <label className="flex items-center gap-2 text-xs">
+                <span className="text-muted-foreground">k</span>
+                <input
+                  className="border-input h-8 w-16 rounded-lg border bg-transparent px-2 text-sm"
+                  type="number"
+                  min={1}
+                  value={rrfK}
+                  onChange={(event) => setRrfK(Number(event.target.value))}
+                  data-testid="retrieval-rrf-k-input"
+                />
+              </label>
+            )}
+          </>
+        )}
+      </div>
+
       {activeRetrieval && (
         <div className="flex flex-wrap items-center gap-2 text-sm" data-testid="retrieval-summary">
           <Badge variant={statusVariant(activeRetrieval.status)}>{activeRetrieval.status}</Badge>
+          <Badge variant="secondary">{activeRetrieval.retrieval_mode}</Badge>
           {activeRetrieval.status === 'completed' && (
             <>
               <span className="text-muted-foreground text-xs">
@@ -146,6 +236,22 @@ export function RetrievalPlayground({
               <div className="flex flex-wrap items-center gap-2">
                 <span className="text-muted-foreground text-xs">#{result.rank}</span>
                 <span className="font-medium">score {result.score.toFixed(3)}</span>
+                {result.dense_score !== null && (
+                  <span
+                    className="text-muted-foreground text-xs"
+                    data-testid="retrieval-dense-score"
+                  >
+                    dense {result.dense_score.toFixed(3)}
+                  </span>
+                )}
+                {result.sparse_score !== null && (
+                  <span
+                    className="text-muted-foreground text-xs"
+                    data-testid="retrieval-sparse-score"
+                  >
+                    sparse {result.sparse_score.toFixed(3)}
+                  </span>
+                )}
                 {result.chunk_heading && (
                   <span className="text-muted-foreground text-xs">{result.chunk_heading}</span>
                 )}
@@ -184,7 +290,10 @@ export function RetrievalPlayground({
                 >
                   {retrieval.query_text}
                 </button>
-                <Badge variant={statusVariant(retrieval.status)}>{retrieval.status}</Badge>
+                <span className="flex items-center gap-1">
+                  <Badge variant="secondary">{retrieval.retrieval_mode}</Badge>
+                  <Badge variant={statusVariant(retrieval.status)}>{retrieval.status}</Badge>
+                </span>
               </li>
             ))}
           </ul>

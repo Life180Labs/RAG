@@ -1889,7 +1889,7 @@ AI Eval ≥ 99
 
 Status
 
-[ ]
+[x]
 
 Priority
 
@@ -1917,53 +1917,65 @@ Deliverables
 
 Backend
 
-[ ] BM25 Engine
+[x] BM25 Engine (`worker/retrieval_worker/bm25.py` — real `rank_bm25.BM25Okapi`, computed fresh
+    per query over the target chunk_set's READY chunks; see docs/03-database.md section 19 for the
+    documented small-corpus IDF limitation)
 
-[ ] Hybrid Retriever
+[x] Hybrid Retriever (`retrieval_worker.execute_retrieval` branches on `retrieval_mode`; dense-only
+    behavior is byte-for-byte unchanged from Phase 9)
 
-[ ] Score Fusion
+[x] Score Fusion (`worker/retrieval_worker/fusion.py` — weighted sum and RRF)
 
-[ ] Ranking Service
+[x] Ranking Service (fusion always returns results sorted by fused score descending; a real
+    candidate pool larger than `top_k` is fetched from both retrievers first, per
+    docs/02-architecture.md section 60, then truncated to `top_k` only after fusion)
 
 ---
 
 Fusion
 
-[ ] Weighted Sum
+[x] Weighted Sum (min-max normalized before combining, since dense/BM25 scales are incomparable)
 
-[ ] Reciprocal Rank Fusion
+[x] Reciprocal Rank Fusion (fuses by rank position, `k` defaults to 60)
 
-[ ] Configurable Weights
+[x] Configurable Weights (`dense_weight`/`sparse_weight`, always normalized to sum to 1)
 
 ---
 
 Configuration
 
-[ ] Dense Weight
+[x] Dense Weight
 
-[ ] Sparse Weight
+[x] Sparse Weight
 
-[ ] Threshold
+[x] Threshold (`score_threshold` applies to the final fused score for hybrid retrievals, the same
+    field Phase 9 already had)
 
 ---
 
 Frontend
 
-[ ] Hybrid Search Dashboard
+[x] Hybrid Search Dashboard (mode toggle + fusion controls nested in the existing Retrieval
+    Playground, rather than a separate page — consistent with the explorer-nesting pattern every
+    other phase's UI already uses)
 
-[ ] Weight Slider
+[x] Weight Slider (`retrieval-weight-slider`, dense/sparse split shown live as it moves)
 
-[ ] Score Comparison
+[x] Score Comparison (fused/dense/sparse scores shown side by side per result)
 
 ---
 
 Testing
 
-[ ] Hybrid Accuracy
+[x] Hybrid Accuracy (`worker/tests/test_fusion.py` verifies expected rankings on controlled
+    examples with known winners; `test_execute_retrieval.py`'s hybrid tests verify end-to-end
+    fusion against a real multi-chunk corpus)
 
-[ ] BM25 Tests
+[x] BM25 Tests (`worker/tests/test_bm25.py` — exact-term-match ranking, zero-score exclusion,
+    empty-corpus/query edge cases, top_k)
 
-[ ] Ranking Tests
+[x] Ranking Tests (fusion unit tests assert exact expected orderings and exact score values,
+    e.g. RRF's `1/(k+rank)` formula)
 
 ---
 
