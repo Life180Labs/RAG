@@ -57,3 +57,28 @@ def enqueue_embed_chunk_set(chunk_set_id: str, provider: str, model: str | None)
             provider=provider,
             error=str(exc),
         )
+
+
+def enqueue_build_index(embedding_version_id: str, provider: str, index_type: str) -> None:
+    client = _build_client()
+    try:
+        client.send_task(
+            "index_worker.build_index", args=[embedding_version_id, provider, index_type]
+        )
+    except Exception as exc:  # noqa: BLE001 - enqueue failure must never break the response
+        logger.error(
+            "enqueue_build_index_failed",
+            embedding_version_id=embedding_version_id,
+            provider=provider,
+            error=str(exc),
+        )
+
+
+def enqueue_delete_index(vector_index_id: str) -> None:
+    client = _build_client()
+    try:
+        client.send_task("index_worker.delete_index", args=[vector_index_id])
+    except Exception as exc:  # noqa: BLE001 - enqueue failure must never break the response
+        logger.error(
+            "enqueue_delete_index_failed", vector_index_id=vector_index_id, error=str(exc)
+        )

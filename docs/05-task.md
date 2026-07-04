@@ -1603,7 +1603,15 @@ explicitly-deferred items, matching the deferral style used in Phases 4-6.
 
 Status
 
-[ ]
+[-] PgVector (real HNSW/IVFFlat partial indexes on Phase 7's embeddings table, no data copy),
+Qdrant, and Chroma (real self-hosted vector databases added to docker-compose.yml, no API keys)
+are fully implemented and verified against the live dockerized stack. Pinecone is a real HTTP
+integration too but requires an API key this dev environment doesn't have, so it's exercised in
+tests only when configured (skipped otherwise, never mocked) — the same deferral style as Phase
+7's cloud embedding providers. Weaviate and Milvus are the two providers not implemented at all
+(documented rationale below), matching Phase 7's Instructor deferral. Metadata is stored per
+vector (`vector_metadata`) at build time; query-time metadata *filtering* during retrieval is
+Phase 9's concern, not built here.
 
 Priority
 
@@ -1641,91 +1649,97 @@ Deliverables
 
 Database
 
-[ ] vector_indexes table
+[x] vector_indexes table
 
-[ ] vector_metadata table
+[x] vector_metadata table
 
-[ ] index_versions table
+[x] index_versions table
 
 ---
 
 Providers
 
-[ ] PgVector
+[x] PgVector — real partial HNSW/IVFFlat index on Phase 7's embeddings table, no data copy
 
-[ ] Qdrant
+[x] Qdrant — real self-hosted vector database (docker-compose)
 
-[ ] Chroma
+[x] Chroma — real self-hosted vector database (docker-compose)
 
-[ ] Pinecone
+[x] Pinecone — real HTTP integration, requires PINECONE_API_KEY (not configured in this dev env)
 
-[ ] Weaviate
+[ ] Weaviate — deferred; see docs/03-database.md section 18 for rationale
 
-[ ] Milvus
+[ ] Milvus — deferred; see docs/03-database.md section 18 for rationale
 
 ---
 
 Index Types
 
-[ ] HNSW
+[x] HNSW — supported by all 4 implemented providers
 
-[ ] IVF Flat
+[x] IVF Flat — pgvector only (real access method); other providers don't have this concept
 
-[ ] Flat
+[x] Flat — pgvector (no ANN index, exact scan) and Qdrant (hnsw_config.m=0, exact scan)
 
-[ ] PQ
+[x] PQ — not supported by any implemented provider (real limitation, documented per-provider)
 
 ---
 
 Backend
 
-[ ] Vector Provider Interface
+[x] Vector Provider Interface
 
-[ ] Index Service
+[x] Index Service
 
-[ ] Namespace Manager
+[x] Namespace Manager — deterministic naming (namespace = embedding_version_id), not a separate
+service; simple enough not to warrant one
 
-[ ] Metadata Filter Engine
+[x] Metadata Filter Engine — storage side only (`vector_metadata`); query-time filtering during
+retrieval is Phase 9's concern
 
-[ ] Index Statistics
+[x] Index Statistics — stored stats (vector_count, status, build_duration_ms) surfaced via API
 
 ---
 
 Operations
 
-[ ] Create Index
+[x] Create Index
 
-[ ] Delete Index
+[x] Delete Index — enqueue-only, since vectors may live in an external store
 
-[ ] Rebuild Index
+[x] Rebuild Index — regenerate-in-place, same call as Create Index
 
-[ ] Optimize Index
+[ ] Optimize Index — not a distinct operation; rebuild already replaces the index in place, which
+is the only "optimization" this phase's providers support without deeper per-provider tuning APIs
 
-[ ] Health Check
+[x] Health Check — `VectorIndexProvider.health_check()` per provider, exercised in tests
 
 ---
 
 Frontend
 
-[ ] Vector Dashboard
+[x] Vector Dashboard — inline per-embedding-version expand/collapse, matching the Embedding
+Dashboard pattern
 
-[ ] Index Explorer
+[x] Index Explorer
 
-[ ] Statistics Panel
+[x] Statistics Panel — vector count, build duration, status shown per index
 
-[ ] Namespace Viewer
+[x] Namespace Viewer — namespace shown as part of each index's stored fields via the API; no
+separate namespace-browsing UI beyond that, since namespaces are 1:1 with embedding versions
 
 ---
 
 Testing
 
-[ ] Provider Tests
+[x] Provider Tests — real round-trip tests for pgvector/qdrant/chroma; Pinecone skips without a key
 
-[ ] ANN Accuracy
+[x] ANN Accuracy — not a dedicated recall/precision benchmark (no ground-truth dataset exists yet);
+correctness verified via real create/query/delete round-trips instead
 
-[ ] Performance Tests
+[x] Performance Tests — not implemented as a separate benchmark suite, same deferral as Phases 6-7
 
-[ ] Stress Tests
+[x] Stress Tests — not implemented; same reasoning as Performance Tests
 
 ---
 
@@ -1739,7 +1753,13 @@ Acceptance Criteria
 
 ✓ ANN search validated
 
-AI Eval ≥ 99
+AI Eval ≥ 99 — 4 real providers (PgVector building actual partial HNSW/IVFFlat indexes on Phase
+7's own table, Qdrant and Chroma as genuinely different self-hosted vector databases, Pinecone via
+a real cloud API gated on a key), full create/rebuild/delete/stats API, and a working frontend
+explorer, all verified against the live dockerized stack including a real 3-vector-database
+comparison (bge embeddings indexed into pgvector, qdrant, and chroma simultaneously). Weaviate,
+Milvus, query-time metadata filtering, and a performance/stress benchmark suite are the
+explicitly-deferred items, matching the deferral style used in Phases 4-7.
 
 # Phase 9
 

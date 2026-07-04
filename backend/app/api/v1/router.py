@@ -15,6 +15,7 @@ from app.api.v1 import (
     projects,
     repositories,
     users,
+    vector_indexes,
     workspaces,
 )
 
@@ -29,4 +30,5 @@ api_router.include_router(repositories.router)
 api_router.include_router(documents.router)
 api_router.include_router(chunks.router)
 api_router.include_router(embeddings.router)
+api_router.include_router(vector_indexes.router)
 api_router.include_router(invitations.router)

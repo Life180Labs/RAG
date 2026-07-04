@@ -6,6 +6,7 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
+import { VectorIndexExplorer } from '@/components/vector-indexes/vector-index-explorer';
 import {
   useCompareEmbeddingVersions,
   useDeleteEmbeddingVersion,
@@ -40,6 +41,7 @@ export function EmbeddingExplorer({
 }) {
   const [selectedProvider, setSelectedProvider] = useState<EmbeddingProviderName>('bge');
   const [expandedVersionId, setExpandedVersionId] = useState<string | null>(null);
+  const [expandedIndexVersionId, setExpandedIndexVersionId] = useState<string | null>(null);
   const [compareA, setCompareA] = useState<string | null>(null);
   const [compareB, setCompareB] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -162,6 +164,17 @@ export function EmbeddingExplorer({
                   >
                     {compareB === version.provider ? 'Unset B' : 'Set B'}
                   </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() =>
+                      setExpandedIndexVersionId(
+                        expandedIndexVersionId === version.id ? null : version.id,
+                      )
+                    }
+                  >
+                    Index
+                  </Button>
                   <Button variant="ghost" size="sm" onClick={() => handleDelete(version.id)}>
                     Delete
                   </Button>
@@ -183,6 +196,14 @@ export function EmbeddingExplorer({
                     </ul>
                   )}
                 </div>
+              )}
+
+              {expandedIndexVersionId === version.id && (
+                <VectorIndexExplorer
+                  documentId={documentId}
+                  chunkSetId={chunkSetId}
+                  embeddingVersionId={version.id}
+                />
               )}
             </li>
           ))}

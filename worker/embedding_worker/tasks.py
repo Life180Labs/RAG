@@ -255,6 +255,11 @@ def embed_chunk_set(
 
         _set_document_status(session, document_id, "INDEXING")
 
+    # By task name, not a Python import of index_worker — same
+    # deployable-independence reasoning as chunk_worker's embedding_worker
+    # handoff.
+    celery_app.send_task("index_worker.build_index", args=[embedding_version_id])
+
     logger.info(
         "embed_chunk_set_completed",
         chunk_set_id=chunk_set_id,

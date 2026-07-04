@@ -612,39 +612,123 @@ Embeddings are never deleted for failure — a provider that isn't configured (e
 a key) still gets a `FAILED` `embedding_versions` row recording why, the same audit-trail pattern
 Phase 5/6 already established for parse/chunk failures.
 
-# 18. Retrieval Schema
+# 18. Vector Index Schema (Phase 8)
+
+Implemented in `backend/app/models/vector_index.py`, migration `0009_add_vector_index_tables`.
+Populated by `index_worker.build_index` (`worker/index_worker/tasks.py`), reading Phase 7's
+`embeddings` table (for PgVector) or copying its vectors into an external store (Qdrant, Chroma,
+Pinecone).
+
+```
+vector_indexes
+  id                    UUID PK
+  embedding_version_id  UUID FK -> embedding_versions.id, ON DELETE CASCADE, indexed
+  document_id           UUID FK -> documents.id, ON DELETE CASCADE, indexed  -- denormalized
+  provider              varchar(20)  -- "pgvector" | "qdrant" | "chroma" | "pinecone"
+  index_type            varchar(20)  -- "hnsw" | "ivf_flat" | "flat" | "pq"
+  namespace             varchar(200) -- collection/index name in the external store, or the
+                                     -- Postgres index name for pgvector; always the
+                                     -- embedding_version_id itself, for a stable 1:1 mapping
+  dimensions            int
+  version               int          -- bumps on rebuild; see below
+  status                enum(vector_index_status): pending | building | ready | failed
+  status_message        varchar(500), nullable
+  vector_count          int, default 0
+  build_duration_ms     int, nullable
+  created_by            UUID FK -> users.id, ON DELETE SET NULL, nullable
+  created_at / updated_at timestamptz
+  UNIQUE(embedding_version_id, provider)  -- uq_vector_index_embedding_version_provider
+
+index_versions
+  id                UUID PK
+  vector_index_id   UUID FK -> vector_indexes.id, ON DELETE CASCADE, indexed
+  version           int
+  vector_count      int
+  status            enum(index_version_status): ready | failed
+  status_message    varchar(500), nullable
+  build_duration_ms int, nullable
+
+vector_metadata
+  id              UUID PK
+  vector_index_id UUID FK -> vector_indexes.id, ON DELETE CASCADE, indexed
+  chunk_id        UUID FK -> chunks.id, ON DELETE CASCADE, indexed
+  metadata_payload jsonb  -- arbitrary per-chunk key/value (heading, page, language, ...),
+                          -- attached at index build time for filtered search
+  UNIQUE(vector_index_id, chunk_id)  -- uq_vector_metadata_index_chunk
+```
+
+**One index per (embedding_version, provider), mirroring the Phase 6/7 pattern exactly.**
+`UNIQUE(embedding_version_id, provider)` lets several indexes coexist per embedding version — one
+per provider actually tried. Re-running "create index" for a provider that already has one rebuilds
+it in place (same `vector_indexes` id, `version` bumped, a new `index_versions` audit row appended)
+rather than creating a duplicate, for the same FK-safety reason Phases 6-7 needed this.
+
+**`index_versions` is a pure audit trail**, distinct from `vector_indexes.version` (the current
+state) — every build or rebuild attempt (including failures) appends one row here, so the full
+history of a namespace's builds stays inspectable even after the current version has moved on.
+
+**Providers implemented:**
+* `pgvector` (default) — no data copy; vectors already live in Phase 7's `embeddings` table.
+  "Building an index" means creating a real ANN index scoped to one embedding_version via a partial
+  index (`CREATE INDEX ... ON embeddings USING hnsw (embedding vector_cosine_ops) WHERE
+  embedding_version_id = ...`). Supports `hnsw` and `ivf_flat` (real pgvector access methods) and
+  `flat` (no ANN index at all — pgvector's actual behavior without one, an exact sequential scan,
+  which is what "flat" legitimately means). `pq` is not implemented — pgvector has no native
+  product-quantization index type, a real limitation, not a deferral choice.
+* `qdrant`, `chroma` — real HTTP clients against self-hosted instances
+  (`qdrant/qdrant`/`chromadb/chroma` in `docker/docker-compose.yml`), no API key needed. Both
+  providers' native ANN index is always HNSW; Qdrant additionally supports `flat` by disabling its
+  HNSW graph (`hnsw_config.m = 0`, forcing exact search); Chroma's client API exposes no such
+  choice, so it only supports `hnsw`. Neither has an `ivf_flat` or `pq` concept.
+* `pinecone` — a real HTTP integration against Pinecone's documented serverless API, gated behind
+  `PINECONE_API_KEY`. This dev environment has no paid key configured, so it's exercised in tests
+  only when the key is present (`pytest.mark.skipif`, the same convention Phase 7's OpenAI/Voyage/
+  Jina tests use) — never mocked.
+* `weaviate`, `milvus` — not implemented. Both are real, legitimate self-hostable vector databases,
+  but adding two more Docker services (Milvus in particular needs its own etcd + object-storage
+  dependencies) was judged disproportionate scope for this phase once PgVector, Qdrant, and Chroma
+  already demonstrate the multi-provider story with genuinely different backing architectures
+  (embedded-in-Postgres vs. two different standalone vector databases). Documented as an explicit
+  deferral, the same "implement several real ones, document the rest honestly" pattern as Phase
+  7's Instructor.
+
+Deleting an index is enqueue-only from the API (`index_worker.delete_index`), never a synchronous
+ORM delete — removing only the `vector_indexes` tracking row would silently orphan the actual
+vectors in an external store, so the worker must reach that store first.
+
+# 19. Retrieval Schema
 
 **Pending — Retrieval Architecture phase.**
 
-# 19. Prompt Schema
+# 20. Prompt Schema
 
 **Pending — Prompt Builder phase.**
 
-# 20. Conversation Schema
+# 21. Conversation Schema
 
 **Pending — Conversation Memory phase.**
 
-# 21. Memory Schema
+# 22. Memory Schema
 
 **Pending — Conversation Memory phase.**
 
-# 22. Evaluation Schema
+# 23. Evaluation Schema
 
 **Pending — Evaluation Engine phase.**
 
-# 23. Experiment Schema
+# 24. Experiment Schema
 
 **Pending — Evaluation Engine phase.**
 
-# 24. Benchmark Schema
+# 25. Benchmark Schema
 
 **Pending — Benchmarking Framework phase.**
 
-# 25. Analytics Schema
+# 26. Analytics Schema
 
 **Pending — Analytics Pipeline phase.**
 
-# 26. Audit Schema
+# 27. Audit Schema
 
 Implemented in `backend/app/models/audit_log.py`. Immutable/append-only: no `updated_at`, no
 soft delete, per docs/06-rule.md.
@@ -663,7 +747,7 @@ audit_logs
 Written by `AuthService` for register/login (success and failure)/logout/password_reset. Broader
 audit coverage (permission changes, uploads, deletes) expands as those features ship.
 
-# 27. API Keys Schema
+# 28. API Keys Schema
 
 **Pending — not yet scheduled in `05-task.md`.** Phase 2 as scoped implemented the
 organization/workspace/project hierarchy, membership, and invitations, but did not include API
@@ -720,7 +804,7 @@ yet (docs/02-architecture.md section 166). No email service exists yet either; t
 token is returned directly in the API response only when `DEBUG=true`, mirroring the Phase 1
 password-reset pattern.
 
-# 28. Session Schema
+# 29. Session Schema
 
 Implemented in `backend/app/models/session.py`. One row per issued refresh token; refresh
 rotates the row's hash in place rather than inserting a new row.
@@ -744,11 +828,11 @@ Password-reset tokens are intentionally *not* stored here — they're single-use
 (30 min), and live only in Redis (`password_reset:<sha256(token)> -> user_id`) so a stolen
 reset token can't be replayed and never touches durable storage.
 
-# 29. Notification Schema
+# 30. Notification Schema
 
 **Pending — not yet scheduled in `05-task.md`.**
 
-# 30. Queue Schema
+# 31. Queue Schema
 
 Celery uses Redis directly as broker/result backend (see `worker/common/celery_app.py`); no
 relational queue table exists. A Dead Letter Queue table is introduced alongside the Document
@@ -756,7 +840,7 @@ Processing phase per docs/02-architecture.md section 151.
 
 ---
 
-# 31. Index Strategy
+# 32. Index Strategy
 
 Mandatory indexes, per docs/06-rule.md Database Rules:
 
@@ -774,14 +858,14 @@ Applied so far: `users.email` (unique), `sessions.user_id`, `audit_logs.user_id`
 
 ---
 
-# 32. Partitioning
+# 33. Partitioning
 
 **Pending.** Time-based partitioning is planned for `audit_logs` and usage/analytics tables once
 they exist, per docs/02-architecture.md section 163.
 
 ---
 
-# 33. Constraints
+# 34. Constraints
 
 * `NOT NULL` on every required column.
 * Foreign keys use `ON DELETE` behavior appropriate to the soft-delete strategy (`RESTRICT` by
@@ -790,14 +874,14 @@ they exist, per docs/02-architecture.md section 163.
 
 ---
 
-# 34. Foreign Keys
+# 35. Foreign Keys
 
 All foreign keys reference the UUID primary key of the parent table and are indexed
 (docs/06-rule.md — "Never skip indexes on large tables").
 
 ---
 
-# 35. Query Optimization
+# 36. Query Optimization
 
 * Repositories only ever issue queries needed for the current use case (no `SELECT *` beyond
   ORM-mapped columns).
@@ -808,14 +892,14 @@ All foreign keys reference the UUID primary key of the parent table and are inde
 
 ---
 
-# 36. Row Level Security
+# 37. Row Level Security
 
 **Pending — Phase 2.** Tenant isolation is enforced at the application/repository layer first;
 PostgreSQL RLS is evaluated as defense-in-depth once the multi-tenant schema exists.
 
 ---
 
-# 37. Backup Strategy
+# 38. Backup Strategy
 
 Local development: Docker named volumes (`postgres_data`, `minio_data` in
 `docker/docker-compose.yml`). Production backup cadence (daily full + hourly incremental) is
@@ -824,7 +908,7 @@ provisioned.
 
 ---
 
-# 38. Migration Strategy
+# 39. Migration Strategy
 
 * Tool: Alembic, async engine (`backend/alembic/env.py`), configured to read
   `Settings.database_url` rather than a hardcoded URL.
@@ -836,14 +920,14 @@ provisioned.
 
 ---
 
-# 39. ER Diagram
+# 40. ER Diagram
 
 **Pending.** Generated once entity schemas beyond Phase 0 exist; will be regenerated after each
 phase that adds tables.
 
 ---
 
-# 40. Naming Convention
+# 41. Naming Convention
 
 * Tables: `snake_case`, plural (`documents`, `chunks`).
 * Columns: `snake_case`.
@@ -853,7 +937,7 @@ phase that adds tables.
 
 ---
 
-# 41. Sample Queries
+# 42. Sample Queries
 
 No domain queries exist yet. The base repository (`backend/app/repositories/base.py`) provides
 `get_by_id`, `list`, `add`, `delete` — every domain repository extends this rather than
@@ -861,7 +945,7 @@ reimplementing CRUD.
 
 ---
 
-# 42. Best Practices
+# 43. Best Practices
 
 * Never bypass the repository layer for data access.
 * Never store large binaries in PostgreSQL — use object storage.

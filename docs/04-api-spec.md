@@ -322,7 +322,36 @@ docs/03-database.md section 17).
 
 # 13. Vector Index APIs
 
-**Pending — Embedding Pipeline phase.**
+Implemented (`backend/app/api/v1/vector_indexes.py`), nested under document, chunk set, and
+embedding version. Both index build and delete always run in `index_worker` — these routes only
+enqueue and read back whatever's already persisted.
+
+| Method | Path | Min role | Purpose |
+|--------|------|----------|---------|
+| POST   | `/api/v1/documents/{document_id}/chunk-sets/{chunk_set_id}/embeddings/{embedding_version_id}/index` | Document ADMIN | Create (or rebuild) an index; body `{"provider": "pgvector", "index_type": "hnsw"}` (`index_type` defaults to `hnsw`) |
+| GET    | `/api/v1/documents/{document_id}/chunk-sets/{chunk_set_id}/embeddings/{embedding_version_id}/index` | Document VIEWER | List indexes for the embedding version (one per provider tried) |
+| GET    | `/api/v1/documents/{document_id}/chunk-sets/{chunk_set_id}/embeddings/{embedding_version_id}/index/{vector_index_id}` | Document VIEWER | Get one index's stored stats (vector_count, status, build_duration_ms, ...) |
+| DELETE | `/api/v1/documents/{document_id}/chunk-sets/{chunk_set_id}/embeddings/{embedding_version_id}/index/{vector_index_id}` | Document ADMIN | Delete an index — enqueue-only, see below |
+
+`POST .../index` returns `SuccessResponse<{enqueued: true, provider, index_type}>` immediately —
+same async contract as chunking/embedding (sections 11-12). Calling it again for a provider that
+already has an index **rebuilds it in place** (same id, `version` bumped) rather than creating a
+duplicate — see docs/03-database.md section 18.
+
+`DELETE .../index/{vector_index_id}` is enqueue-only too (`{"enqueued": true}`), unlike chunk/
+embedding delete (which delete synchronously): the actual vectors may live in an external store
+(Qdrant/Chroma/Pinecone), so only `index_worker` can safely remove them, and a synchronous delete
+of just the tracking row would silently orphan that external data.
+
+`provider` accepts `pgvector` (default, no data copy — builds a real ANN index directly on
+Phase 7's `embeddings` table), `qdrant`/`chroma` (real self-hosted vector databases, no API key),
+or `pinecone` (real cloud API, requires `PINECONE_API_KEY` on the worker — same async-failure
+contract as Phase 7's cloud embedding providers: an unconfigured key doesn't 422 at request time,
+the resulting index ends up `status: "failed"` with `status_message` explaining why). `weaviate`
+and `milvus` are not implemented (see docs/03-database.md section 18). `index_type` accepts `hnsw`,
+`ivf_flat`, `flat`, `pq` — not every provider supports every type (a real limitation for that
+provider, not a request validation error: an unsupported combination also surfaces as
+`status: "failed"` on the index, since the check happens inside the async worker task).
 
 # 14. Search APIs
 

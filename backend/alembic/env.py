@@ -20,6 +20,7 @@ from app.models import (  # noqa: F401
     repository,
     session,
     user,
+    vector_index,
     workspace,
 )
 from app.models.base import Base

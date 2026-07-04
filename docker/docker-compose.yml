@@ -46,6 +46,30 @@ services:
       timeout: 5s
       retries: 10
 
+  qdrant:
+    image: qdrant/qdrant:latest
+    ports:
+      - "${QDRANT_PORT:-6333}:6333"
+    volumes:
+      - qdrant_data:/qdrant/storage
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c ':> /dev/tcp/127.0.0.1/6333' || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  chroma:
+    image: chromadb/chroma:latest
+    ports:
+      - "${CHROMA_PORT:-8001}:8000"
+    volumes:
+      - chroma_data:/chroma/chroma
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c ':> /dev/tcp/127.0.0.1/8000' || exit 1"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
   migrate:
     build:
       context: ../backend
@@ -103,6 +127,8 @@ services:
       MINIO_ACCESS_KEY: ${MINIO_ROOT_USER:-ragadmin}
       MINIO_SECRET_KEY: ${MINIO_ROOT_PASSWORD:-ragadminsecret}
       MINIO_BUCKET: ${MINIO_BUCKET:-rag-documents}
+      QDRANT_URL: http://qdrant:6333
+      CHROMA_URL: http://chroma:8000
     volumes:
       - ../worker:/app
     depends_on:
@@ -111,6 +137,10 @@ services:
       postgres:
         condition: service_healthy
       minio:
+        condition: service_healthy
+      qdrant:
+        condition: service_healthy
+      chroma:
         condition: service_healthy
       migrate:
         condition: service_completed_successfully
@@ -133,4 +163,6 @@ volumes:
   postgres_data:
   redis_data:
   minio_data:
+  qdrant_data:
+  chroma_data:
   frontend_node_modules:

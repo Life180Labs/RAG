@@ -1,9 +1,9 @@
 """Shared Celery application.
 
 Queue-specific workers (document_worker, chunk_worker, embedding_worker,
-evaluation_worker, benchmark_worker) register their tasks against this
-app and are deployed as independent, horizontally-scalable processes per
-docs/02-architecture.md section 182 (Worker Scaling).
+index_worker, evaluation_worker, benchmark_worker) register their tasks
+against this app and are deployed as independent, horizontally-scalable
+processes per docs/02-architecture.md section 182 (Worker Scaling).
 """
 
 from celery import Celery
@@ -34,6 +34,7 @@ celery_app.autodiscover_tasks(
         "document_worker",
         "chunk_worker",
         "embedding_worker",
+        "index_worker",
         "retrieval_worker",
         "evaluation_worker",
         "benchmark_worker",

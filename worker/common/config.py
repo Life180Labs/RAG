@@ -35,6 +35,18 @@ class WorkerSettings(BaseSettings):
     voyage_api_key: str | None = None
     jina_api_key: str | None = None
 
+    # Vector index providers (Phase 8). Qdrant/Chroma are self-hosted via
+    # docker-compose; the defaults below match docker-compose.yml's default
+    # *host*-side port mappings (chroma's container port 8000 is mapped to
+    # host 8001 there specifically to avoid colliding with the backend API's
+    # own port 8000), for pytest runs executed directly on the host rather
+    # than inside the worker container. Pinecone is cloud-only and requires
+    # an API key, same optional/skip pattern as the Phase 7 cloud embedding
+    # providers.
+    qdrant_url: str = "http://localhost:6333"
+    chroma_url: str = "http://localhost:8001"
+    pinecone_api_key: str | None = None
+
 
 @lru_cache
 def get_worker_settings() -> WorkerSettings:
