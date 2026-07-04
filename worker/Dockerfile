@@ -16,6 +16,7 @@ COPY scheduler ./scheduler
 
 RUN pip install --no-cache-dir --upgrade pip \
     && pip install --no-cache-dir --prefix=/install .
+RUN PYTHONPATH=/install/lib/python3.11/site-packages python -c "import tiktoken; tiktoken.get_encoding('cl100k_base')"
 
 FROM python:3.11-slim AS runtime
 WORKDIR /app

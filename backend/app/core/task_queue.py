@@ -29,3 +29,16 @@ def enqueue_finalize_upload(document_id: str) -> None:
         client.send_task("document_worker.finalize_upload", args=[document_id])
     except Exception as exc:  # noqa: BLE001 - enqueue failure must never break the upload response
         logger.error("enqueue_finalize_upload_failed", document_id=document_id, error=str(exc))
+
+
+def enqueue_chunk_document(document_id: str, strategy: str) -> None:
+    client = _build_client()
+    try:
+        client.send_task("chunk_worker.chunk_document", args=[document_id, strategy])
+    except Exception as exc:  # noqa: BLE001 - enqueue failure must never break the response
+        logger.error(
+            "enqueue_chunk_document_failed",
+            document_id=document_id,
+            strategy=strategy,
+            error=str(exc),
+        )

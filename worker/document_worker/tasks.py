@@ -254,6 +254,13 @@ def parse_document(document_id: str) -> dict:
 
         _set_status(session, document_id, "CHUNKING")
 
+    # By task name (`send_task`), not a Python import of chunk_worker —
+    # same reasoning as the backend enqueueing this very task by name in
+    # app/core/task_queue.py: document_worker and chunk_worker are
+    # separate deployables (docs/02-architecture.md section 182 Worker
+    # Scaling), even though they currently ship in the same image.
+    celery_app.send_task("chunk_worker.chunk_document", args=[document_id])
+
     logger.info(
         "parse_document_completed",
         document_id=document_id,

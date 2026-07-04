@@ -268,7 +268,33 @@ directly. Its results surface in two places:
 
 # 11. Chunking APIs
 
-**Pending — Chunking Engine phase.**
+Implemented (`backend/app/api/v1/chunks.py`), nested under their document. Like parsing, actual
+chunk generation always runs in `chunk_worker` (`chunk_worker.chunk_document`) — these routes only
+enqueue it (via the same post-commit `BackgroundTasks.add_task` pattern as section 9's uploads, so
+the enqueue can't race ahead of the DB transaction) and read back whatever's already persisted;
+there's no synchronous "wait for the chunks" response.
+
+| Method | Path                                                              | Min role | Purpose |
+|--------|-------------------------------------------------------------------|----------|---------|
+| POST   | `/api/v1/documents/{document_id}/chunk-sets`                      | Document ADMIN | Generate (or regenerate) chunks with a given `strategy`; body `{"strategy": "recursive"}` |
+| GET    | `/api/v1/documents/{document_id}/chunk-sets`                      | Document VIEWER | List chunk sets for the document (one per strategy tried) |
+| GET    | `/api/v1/documents/{document_id}/chunk-sets/compare`               | Document VIEWER | Query params `strategy_a`, `strategy_b` — chunks from both sets side by side |
+| GET    | `/api/v1/documents/{document_id}/chunk-sets/{chunk_set_id}/chunks` | Document VIEWER | List chunks in a set, paginated (`limit` 1-500 default 100, `offset`) |
+| DELETE | `/api/v1/documents/{document_id}/chunk-sets/{chunk_set_id}`        | Document ADMIN | Delete a chunk set and its chunks |
+
+`POST .../chunk-sets` returns `SuccessResponse<{enqueued: true, strategy}>` immediately — it does
+not return the chunks themselves or a chunk_set id, since generation is async and (for a new
+strategy) the row doesn't exist as `ready` yet. Poll `GET .../chunk-sets` and check `status`.
+Calling it again with a strategy that already has a set **regenerates in place** (same chunk_set
+`id`, old chunks replaced) rather than creating a duplicate — see docs/03-database.md section 16.
+
+`strategy` accepts any of the 11 names: `fixed`, `sliding_window`, `recursive`, `paragraph`,
+`sentence`, `structural`, `semantic`, `parent_child`, `hierarchical`, `adaptive`, plus `markdown`/
+`html` as aliases of `structural`. An unrecognized strategy returns `422` before enqueueing.
+
+# 12. Embedding APIs
+
+**Pending — Embedding Pipeline phase.**
 
 # 12. Embedding APIs
 

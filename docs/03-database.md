@@ -446,9 +446,90 @@ There's no separate dead-letter queue infrastructure — once retries are exhaus
 `FAILED_PARSE`/`FAILED_OCR` status and `status_message` on `documents` *is* the dead-letter record,
 consistent with how Phase 4 already surfaces failures.
 
-# 16. Chunk Schema
+# 16. Chunk Schema (Phase 6)
 
-**Pending — Chunking Engine phase.**
+Implemented in `backend/app/models/chunk.py`, migration `0007_add_chunk_tables`. Populated by
+`chunk_worker.chunk_document` (`worker/chunk_worker/tasks.py`), reading Phase 5's
+`document_content.structured_content` blocks — never the flattened `raw_text`, so headings/lists/
+tables stay available as chunk boundaries.
+
+```
+document_chunk_sets
+  id                UUID PK
+  document_id       UUID FK -> documents.id, ON DELETE CASCADE, indexed
+  version           int                     -- documents.current_version at chunk-time
+  strategy          varchar(20)             -- "fixed" | "sliding_window" | "recursive" |
+                                             -- "paragraph" | "sentence" | "structural" |
+                                             -- "semantic" | "parent_child" | "hierarchical" |
+                                             -- "adaptive" (11th, "markdown"/"html", is an alias
+                                             -- of "structural" — see below)
+  config            jsonb                   -- chunk_size/overlap/etc. actually used
+  status            enum(chunk_set_status): pending | ready | failed
+  status_message    varchar(500), nullable
+  chunk_count       int, default 0
+  created_by        UUID FK -> users.id, ON DELETE SET NULL, nullable
+  created_at / updated_at timestamptz
+  UNIQUE(document_id, strategy)  -- uq_chunk_set_document_strategy
+
+chunks
+  id                UUID PK
+  chunk_set_id      UUID FK -> document_chunk_sets.id, ON DELETE CASCADE, indexed
+  parent_chunk_id   UUID FK -> chunks.id, ON DELETE CASCADE, nullable  -- parent_child/hierarchical only
+  chunk_index       int
+  text              text
+  char_start        int
+  char_end          int
+  token_count       int                     -- tiktoken cl100k_base
+  page              int, nullable           -- carried from the source block, PDF only
+  heading           varchar(500), nullable  -- nearest enclosing heading's text
+  language          varchar(10), nullable
+  status            enum(chunk_status): ready | failed | skipped
+  status_message    varchar(500), nullable
+  embedding_model   varchar(100), nullable  -- populated by Phase 7; null until then
+  created_at        timestamptz
+  UNIQUE(chunk_set_id, chunk_index)  -- uq_chunk_set_index
+```
+
+**One set per (document, strategy), not one set per document.** `UNIQUE(document_id, strategy)`
+deliberately allows several chunk sets to coexist for the same document — one per strategy the
+user has actually generated — which is what makes the "Compare Chunkers" UI possible.
+Re-generating with a strategy that already has a set reuses that set's `id` (updating `config`/
+`status`/`chunk_count` in place) rather than creating a new row, and deletes+replaces its `chunks`
+rows; the id is reused specifically because `chunks.chunk_set_id` has no `ON UPDATE CASCADE`, so
+swapping the parent's primary key on regen would orphan the FK (found via manual e2e testing
+before the automated test suite existed, fixed by reusing the id and deleting old chunks before
+the upsert, not after).
+
+**Chunk metadata lives directly on `Chunk`**, not a separate `chunk_metadata` table — it's a
+strict 1:1, no independent lifecycle, so a join table would only add overhead. "Section" is
+represented by `heading` (nearest enclosing heading's text); there's no separate outline-numbering
+system.
+
+**11 named strategies, implemented as fewer underlying algorithms:**
+* `fixed` / `sliding_window` — character windows with configurable overlap.
+* `recursive` — block → sentence → word fallback, preserving semantic boundaries; the preferred
+  default when no strategy is specified.
+* `paragraph` / `sentence` — block-level / sentence-level merging up to the token budget.
+* `structural` — splits on heading boundaries; `markdown` and `html` are documented names for the
+  same function, since both formats already arrive as the same `structured_content` block shape by
+  the time chunking runs (Phase 5 already did format-specific structure detection).
+* `semantic` — adjacent-sentence TF-IDF cosine similarity (scikit-learn) as the split signal. This
+  is a deliberate lightweight proxy, not a stub: real embedding-based semantic chunking needs
+  Phase 7's embedding model, so TF-IDF is the honest interim implementation, documented here to be
+  revisited once Phase 7 lands.
+* `parent_child` — two-level: `structural` parents, `recursive` children (`parent_chunk_id` set).
+* `hierarchical` — N-level generalization of `parent_child` with shrinking token budgets per level.
+* `adaptive` — heuristic dispatcher choosing among the above based on heading density and document
+  size (falls back to `paragraph` for short, headingless documents; `structural` once a document
+  has enough headings; `recursive` otherwise).
+
+**`document_chunk_sets.chunk_count` is a per-set count**, not deduplicated across sets — a document
+compared across 3 strategies has 3 independent `chunk_count` values, each counting only that set's
+own `chunks` rows. There's no repository-wide "total chunks" rollup; it isn't needed until
+Phase 7's embedding cost estimation, at which point it can be derived by summing.
+
+Chunks are never deleted for validation failures — `status = failed`/`skipped` chunks stay in the
+table (audit trail), the same pattern as Phase 5's `FAILED_PARSE` on `documents`.
 
 # 17. Embedding Schema
 

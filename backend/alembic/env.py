@@ -10,6 +10,7 @@ from app.core.config import get_settings
 # Import all model modules here so Base.metadata is fully populated for autogenerate.
 from app.models import (  # noqa: F401
     audit_log,
+    chunk,
     document,
     document_content,
     invitation,
