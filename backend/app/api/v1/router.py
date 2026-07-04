@@ -8,6 +8,7 @@ from app.api.v1 import (
     auth,
     chunks,
     documents,
+    embeddings,
     health,
     invitations,
     organizations,
@@ -27,4 +28,5 @@ api_router.include_router(projects.router)
 api_router.include_router(repositories.router)
 api_router.include_router(documents.router)
 api_router.include_router(chunks.router)
+api_router.include_router(embeddings.router)
 api_router.include_router(invitations.router)

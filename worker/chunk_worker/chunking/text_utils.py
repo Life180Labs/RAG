@@ -11,7 +11,7 @@ display alongside it.
 
 import re
 
-from chunk_worker.chunking.tokenizer import count_tokens
+from common.tokenizer import count_tokens
 
 _NON_PROSE_TYPES = {"image"}
 _HEADING_TYPES = {"title", "heading"}

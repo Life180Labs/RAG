@@ -42,3 +42,18 @@ def enqueue_chunk_document(document_id: str, strategy: str) -> None:
             strategy=strategy,
             error=str(exc),
         )
+
+
+def enqueue_embed_chunk_set(chunk_set_id: str, provider: str, model: str | None) -> None:
+    client = _build_client()
+    try:
+        client.send_task(
+            "embedding_worker.embed_chunk_set", args=[chunk_set_id, provider, model]
+        )
+    except Exception as exc:  # noqa: BLE001 - enqueue failure must never break the response
+        logger.error(
+            "enqueue_embed_chunk_set_failed",
+            chunk_set_id=chunk_set_id,
+            provider=provider,
+            error=str(exc),
+        )

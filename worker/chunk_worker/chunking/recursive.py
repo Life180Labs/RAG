@@ -13,7 +13,7 @@ would destroy more meaning than an oversized chunk preserves.
 """
 
 from chunk_worker.chunking.text_utils import merge_units_to_chunks, split_sentences
-from chunk_worker.chunking.tokenizer import count_tokens
+from common.tokenizer import count_tokens
 
 DEFAULT_MAX_TOKENS = 400
 _NON_SPLITTABLE_TYPES = {"table", "code"}

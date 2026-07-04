@@ -205,6 +205,11 @@ def chunk_document(document_id: str, strategy: str | None = None) -> dict:
 
         _set_document_status(session, document_id, "EMBEDDING")
 
+    # By task name, not a Python import of embedding_worker — same
+    # deployable-independence reasoning as document_worker's chunk_worker
+    # handoff above.
+    celery_app.send_task("embedding_worker.embed_chunk_set", args=[chunk_set_id])
+
     logger.info(
         "chunk_document_completed",
         document_id=document_id,

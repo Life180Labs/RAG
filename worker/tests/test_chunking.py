@@ -12,8 +12,8 @@ from chunk_worker.chunking.semantic import chunk_semantic
 from chunk_worker.chunking.sentence import chunk_sentence
 from chunk_worker.chunking.structural import chunk_structural
 from chunk_worker.chunking.text_utils import join_blocks_with_spans, split_sentences
-from chunk_worker.chunking.tokenizer import count_tokens
 from chunk_worker.chunking.validation import validate_chunks
+from common.tokenizer import count_tokens
 
 MULTI_SECTION_BLOCKS = [
     {"type": "title", "text": "My Report", "level": None, "page": 1},

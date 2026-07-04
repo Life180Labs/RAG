@@ -531,9 +531,86 @@ Phase 7's embedding cost estimation, at which point it can be derived by summing
 Chunks are never deleted for validation failures — `status = failed`/`skipped` chunks stay in the
 table (audit trail), the same pattern as Phase 5's `FAILED_PARSE` on `documents`.
 
-# 17. Embedding Schema
+# 17. Embedding Schema (Phase 7)
 
-**Pending — Embedding Pipeline phase.**
+Implemented in `backend/app/models/embedding.py`, migration `0008_add_embedding_tables`.
+Populated by `embedding_worker.embed_chunk_set` (`worker/embedding_worker/tasks.py`), reading
+Phase 6's `chunks.text` — never re-deriving text from `document_content`, since embeddings are
+scoped to one specific chunking run.
+
+```
+embedding_versions
+  id                UUID PK
+  chunk_set_id      UUID FK -> document_chunk_sets.id, ON DELETE CASCADE, indexed
+  document_id       UUID FK -> documents.id, ON DELETE CASCADE, indexed  -- denormalized, avoids
+                                                                          -- a join for repo-wide queries
+  provider          varchar(20)             -- "bge" | "e5" | "nomic" | "openai" | "voyage" | "jina"
+  model             varchar(100)            -- e.g. "BAAI/bge-small-en-v1.5"
+  dimensions         int                    -- true native dimensionality (see padding note below)
+  version           int                     -- bumps on regenerate; see below
+  status            enum(embedding_version_status): pending | ready | failed
+  status_message    varchar(500), nullable
+  embedding_count   int, default 0
+  total_tokens      int, default 0
+  total_cost_usd    numeric(12,6), nullable -- null for free/local providers
+  avg_latency_ms    int, nullable
+  created_by        UUID FK -> users.id, ON DELETE SET NULL, nullable
+  created_at / updated_at timestamptz
+  UNIQUE(chunk_set_id, provider, model)  -- uq_embedding_version_chunk_set_provider_model
+
+embeddings
+  id                    UUID PK
+  embedding_version_id  UUID FK -> embedding_versions.id, ON DELETE CASCADE, indexed
+  chunk_id              UUID FK -> chunks.id, ON DELETE CASCADE, indexed
+  embedding             vector(1536)         -- fixed pgvector width; see padding note below
+  token_count           int
+  cost_usd              numeric(10,6), nullable  -- null for free/local providers
+  latency_ms            int
+  status                enum(embedding_status): ready | failed
+  status_message        varchar(500), nullable
+  UNIQUE(embedding_version_id, chunk_id)  -- uq_embedding_version_chunk
+```
+
+**One version per (chunk_set, provider, model), mirroring Phase 6's chunk_set pattern exactly.**
+`UNIQUE(chunk_set_id, provider, model)` lets several embedding versions coexist per chunk set —
+one per provider+model actually tried — which is what makes "Compare Models" possible.
+Re-generating with a provider+model that already has a version reuses that version's `id` (bumping
+`version`, replacing its `embeddings` rows) rather than creating a new row, for the identical
+FK-safety reason Phase 6 needed this: `embeddings.embedding_version_id` has no `ON UPDATE CASCADE`,
+so swapping the parent's primary key on regen would orphan the FK.
+
+**Fixed-width `vector(1536)` column, zero-padded for smaller models.** pgvector requires one fixed
+dimension per column, but this phase's providers range from 384 dims (bge-small) to 1536 (OpenAI
+text-embedding-3-small). Every vector is zero-padded out to 1536 before insert; the true
+dimensionality is recorded on `embedding_versions.dimensions`. Padding with zeros doesn't corrupt
+similarity *within* one embedding version (both sides of any comparison carry the same trailing
+zeros), but comparing raw vectors *across* differently-dimensioned embedding versions is
+meaningless — retrieval (Phase 9) must always filter ANN search to a single `embedding_version_id`,
+never mix versions.
+
+**Providers implemented:**
+* `bge`, `e5`, `nomic` — real local inference via `fastembed` (ONNX Runtime, no torch, no API key).
+  `bge` (`BAAI/bge-small-en-v1.5`, 384 dims) is the default and the one model pre-cached at Docker
+  build time; `e5` (`intfloat/multilingual-e5-large`) and `nomic`
+  (`nomic-ai/nomic-embed-text-v1.5`) are equally real but download their weights on first use
+  instead, to keep the worker image/build size reasonable.
+* `openai`, `voyage`, `jina` — real HTTP integrations against each provider's documented embeddings
+  API (not stubs), gated behind `OPENAI_API_KEY`/`VOYAGE_API_KEY`/`JINA_API_KEY`. This dev
+  environment has no paid keys configured, so these paths are exercised in tests only when the
+  corresponding key is present (`pytest.mark.skipif`, the same convention Phase 5's OCR tests use
+  for missing local binaries) — never mocked.
+* `instructor` — not implemented (would need a distinct loading mechanism from the other local
+  models); explicitly deferred rather than silently omitted, same "implement the real ones,
+  document the rest" pattern as Phase 5's EasyOCR/PaddleOCR deferral.
+
+Token counts reuse the same `tiktoken` `cl100k_base` approximation Phase 6 uses for chunks
+(`worker/common/tokenizer.py`, promoted out of `chunk_worker` in this phase since both worker
+packages now need it) rather than loading each provider's own tokenizer — a deliberate, documented
+simplification, not an oversight.
+
+Embeddings are never deleted for failure — a provider that isn't configured (e.g. `openai` without
+a key) still gets a `FAILED` `embedding_versions` row recording why, the same audit-trail pattern
+Phase 5/6 already established for parse/chunk failures.
 
 # 18. Retrieval Schema
 

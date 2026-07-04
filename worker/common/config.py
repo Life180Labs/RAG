@@ -27,6 +27,14 @@ class WorkerSettings(BaseSettings):
     minio_bucket: str = "rag-documents"
     minio_secure: bool = False
 
+    # Cloud embedding providers (Phase 7) — optional; a provider is only
+    # usable once its key is set. Unset in this dev environment, so the
+    # corresponding provider tests are skipped (see embedding_worker tests),
+    # never mocked.
+    openai_api_key: str | None = None
+    voyage_api_key: str | None = None
+    jina_api_key: str | None = None
+
 
 @lru_cache
 def get_worker_settings() -> WorkerSettings:

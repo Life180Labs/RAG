@@ -294,11 +294,31 @@ Calling it again with a strategy that already has a set **regenerates in place**
 
 # 12. Embedding APIs
 
-**Pending — Embedding Pipeline phase.**
+Implemented (`backend/app/api/v1/embeddings.py`), nested under both their document and chunk set
+(embeddings belong to a specific chunking run, not the document as a whole). Like chunking, actual
+embedding generation always runs in `embedding_worker` (`embedding_worker.embed_chunk_set`) — these
+routes only enqueue it and read back whatever's already persisted.
 
-# 12. Embedding APIs
+| Method | Path                                                                          | Min role | Purpose |
+|--------|--------------------------------------------------------------------------------|----------|---------|
+| POST   | `/api/v1/documents/{document_id}/chunk-sets/{chunk_set_id}/embeddings`          | Document ADMIN | Generate (or regenerate) embeddings with a given `provider` (+ optional `model`); body `{"provider": "bge"}` |
+| GET    | `/api/v1/documents/{document_id}/chunk-sets/{chunk_set_id}/embeddings`          | Document VIEWER | List embedding versions for the chunk set (one per provider+model tried) |
+| GET    | `/api/v1/documents/{document_id}/chunk-sets/{chunk_set_id}/embeddings/compare`  | Document VIEWER | Query params `provider_a`, `provider_b` — both versions' vectors side by side |
+| GET    | `/api/v1/documents/{document_id}/chunk-sets/{chunk_set_id}/embeddings/{embedding_version_id}/vectors` | Document VIEWER | List per-chunk embedding rows in a version, paginated (`limit` 1-500 default 100, `offset`) — metadata only (token count, cost, latency, status), never the raw vector array |
+| DELETE | `/api/v1/documents/{document_id}/chunk-sets/{chunk_set_id}/embeddings/{embedding_version_id}` | Document ADMIN | Delete an embedding version and its vectors |
 
-**Pending — Embedding Pipeline phase.**
+`POST .../embeddings` returns `SuccessResponse<{enqueued: true, provider, model}>` immediately —
+same async-generation contract as chunking (section 11): no embedding_version id or vectors in the
+response, poll `GET .../embeddings` and check `status`. Calling it again with a provider+model that
+already has a version **regenerates in place** (same id, `version` bumped, old vectors replaced)
+rather than creating a duplicate — see docs/03-database.md section 17.
+
+`provider` accepts `bge`, `e5`, `nomic` (real local inference, no API key required), or `openai`,
+`voyage`, `jina` (real cloud APIs, require the corresponding `{PROVIDER}_API_KEY` to be configured
+on the worker — an unconfigured provider doesn't 422 at request time, since generation is async;
+instead the resulting embedding_version ends up `status: "failed"` with `status_message` explaining
+the missing key, discoverable via `GET .../embeddings`). `instructor` is not yet implemented (see
+docs/03-database.md section 17).
 
 # 13. Vector Index APIs
 

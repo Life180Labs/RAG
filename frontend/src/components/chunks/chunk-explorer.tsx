@@ -6,6 +6,7 @@ import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
+import { EmbeddingExplorer } from '@/components/embeddings/embedding-explorer';
 import {
   useChunkSets,
   useChunks,
@@ -25,6 +26,7 @@ function statusVariant(status: ChunkSetStatus): 'default' | 'secondary' | 'destr
 export function ChunkExplorer({ documentId }: { documentId: string }) {
   const [selectedStrategy, setSelectedStrategy] = useState<ChunkStrategy>('recursive');
   const [expandedSetId, setExpandedSetId] = useState<string | null>(null);
+  const [expandedEmbeddingsSetId, setExpandedEmbeddingsSetId] = useState<string | null>(null);
   const [compareA, setCompareA] = useState<string | null>(null);
   const [compareB, setCompareB] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -129,6 +131,15 @@ export function ChunkExplorer({ documentId }: { documentId: string }) {
                   >
                     {compareB === set.strategy ? 'Unset B' : 'Set B'}
                   </Button>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() =>
+                      setExpandedEmbeddingsSetId(expandedEmbeddingsSetId === set.id ? null : set.id)
+                    }
+                  >
+                    Embeddings
+                  </Button>
                   <Button variant="ghost" size="sm" onClick={() => handleDelete(set.id)}>
                     Delete
                   </Button>
@@ -152,6 +163,10 @@ export function ChunkExplorer({ documentId }: { documentId: string }) {
                     </ul>
                   )}
                 </div>
+              )}
+
+              {expandedEmbeddingsSetId === set.id && (
+                <EmbeddingExplorer documentId={documentId} chunkSetId={set.id} />
               )}
             </li>
           ))}

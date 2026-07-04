@@ -13,6 +13,7 @@ from app.models import (  # noqa: F401
     chunk,
     document,
     document_content,
+    embedding,
     invitation,
     organization,
     project,
