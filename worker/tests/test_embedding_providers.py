@@ -10,10 +10,10 @@ import os
 
 import pytest
 
-from embedding_worker.providers.base import ProviderNotConfiguredError
-from embedding_worker.providers.cloud import JinaEmbeddingProvider, OpenAIEmbeddingProvider
-from embedding_worker.providers.factory import default_model, get_provider
-from embedding_worker.providers.local import LocalEmbeddingProvider
+from common.embedding_providers.base import ProviderNotConfiguredError
+from common.embedding_providers.cloud import JinaEmbeddingProvider, OpenAIEmbeddingProvider
+from common.embedding_providers.factory import default_model, get_provider
+from common.embedding_providers.local import LocalEmbeddingProvider
 
 
 def test_local_provider_embeds_real_texts():
@@ -73,7 +73,7 @@ def test_openai_provider_embeds_real_texts_live():
     reason="VOYAGE_API_KEY not configured in this environment",
 )
 def test_voyage_provider_embeds_real_texts_live():
-    from embedding_worker.providers.cloud import VoyageEmbeddingProvider
+    from common.embedding_providers.cloud import VoyageEmbeddingProvider
 
     provider = VoyageEmbeddingProvider("voyage-2", api_key=os.environ["VOYAGE_API_KEY"])
     results = provider.embed(["hello world"])

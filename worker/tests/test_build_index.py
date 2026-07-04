@@ -11,6 +11,7 @@ from sqlalchemy import text
 from chunk_worker.tasks import chunk_document
 from common.db import SessionLocal
 from embedding_worker.tasks import embed_chunk_set
+from index_worker.providers.pgvector_provider import PgVectorProvider
 from index_worker.tasks import build_index, delete_index
 
 BLOCKS = [
@@ -130,6 +131,53 @@ def test_build_index_regenerating_same_provider_bumps_version(document_chain):
 def test_build_index_skips_when_embedding_version_not_found():
     result = build_index.run(str(uuid.uuid4()))
     assert result == {"status": "skipped", "reason": "embedding_version_not_found"}
+
+
+def test_build_index_pgvector_search_finds_nearest_and_supports_all_metrics(document_chain):
+    document_id = _insert_document_with_content(
+        document_chain["repository_id"], document_chain["user_id"]
+    )
+    chunk_document.run(str(document_id), "structural")
+    embedding_version_id = _embedding_version_id(document_id)
+    build_index.run(embedding_version_id, "pgvector")
+
+    with SessionLocal() as session:
+        provider = PgVectorProvider(session)
+        chunk_row = session.execute(
+            text(
+                "SELECT chunk_id FROM embeddings WHERE embedding_version_id = :id LIMIT 1"
+            ),
+            {"id": embedding_version_id},
+        ).first()
+        version_row = session.execute(
+            text("SELECT dimensions FROM embedding_versions WHERE id = :id"),
+            {"id": embedding_version_id},
+        ).first()
+        query_row = session.execute(
+            text(
+                "SELECT embedding::text AS text FROM embeddings "
+                "WHERE embedding_version_id = :id AND chunk_id = :chunk_id"
+            ),
+            {"id": embedding_version_id, "chunk_id": chunk_row.chunk_id},
+        ).first()
+        # Truncated to the embedding's true (unpadded) dimensionality —
+        # matches how retrieval_worker.tasks calls search() with a fresh
+        # embedder.embed(...) result, never the raw 1536-wide stored column.
+        vector = [float(x) for x in query_row.text.strip("[]").split(",")][: version_row.dimensions]
+
+        for metric in ("cosine", "dot", "euclidean"):
+            hits = provider.search(
+                embedding_version_id, vector, top_k=5, metric=metric,
+                score_threshold=None, metadata_filter=None,
+            )
+            assert hits, f"expected hits for metric={metric}"
+            assert hits[0].chunk_id == str(chunk_row.chunk_id)
+
+        filtered = provider.search(
+            embedding_version_id, vector, top_k=5, metric="cosine",
+            score_threshold=None, metadata_filter={"heading": "Section One"},
+        )
+        assert all(hit.metadata.get("heading") == "Section One" for hit in filtered)
 
 
 def test_delete_index_removes_row_and_skips_when_missing(document_chain):

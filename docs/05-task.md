@@ -1765,7 +1765,7 @@ explicitly-deferred items, matching the deferral style used in Phases 4-7.
 
 Status
 
-[ ]
+[x]
 
 Priority
 
@@ -1795,69 +1795,81 @@ Deliverables
 
 Similarity Metrics
 
-[ ] Cosine
+[x] Cosine
 
-[ ] Dot Product
+[x] Dot Product (PgVector only — Qdrant/Chroma/Pinecone indexes are always built cosine-only)
 
-[ ] Euclidean
+[x] Euclidean (PgVector only, same reason)
 
 ---
 
 Backend
 
-[ ] Retriever Service
+[x] Retriever Service (`retrieval_worker.execute_retrieval` — embeds the query with the same
+    provider/model as the target index, then searches it)
 
-[ ] Similarity Calculator
+[x] Similarity Calculator (PgVector's `<=>`/`<#>`/`<->` operators; Qdrant/Chroma/Pinecone's native
+    cosine scoring, all normalized so higher-is-better)
 
-[ ] Candidate Generator
+[x] Candidate Generator (`VectorIndexProvider.search()`, extending Phase 8's provider abstraction)
 
-[ ] Confidence Calculator
+[x] Confidence Calculator (avg/min/max similarity aggregated and persisted per retrieval — a
+    calibrated confidence model beyond raw similarity is out of scope for this phase)
 
 ---
 
 Retrieval Features
 
-[ ] Top-K
+[x] Top-K
 
-[ ] Score Threshold
+[x] Score Threshold
 
-[ ] Namespace Search
+[x] Namespace Search (every search is scoped to exactly one vector index's namespace — see
+    docs/03-database.md section 19 for why cross-index search is never meaningful here)
 
-[ ] Metadata Filter
+[x] Metadata Filter (exact-match over heading/page/language, the three keys Phase 8 attaches at
+    index build time)
 
-[ ] Pagination
+[x] Pagination (`GET .../retrievals?limit=&offset=` on the retrieval history list)
 
 ---
 
 Metrics
 
-[ ] Recall
+[ ] Recall — requires a labeled ground-truth dataset (query -> expected chunk ids) to compute
+    against; no such dataset exists yet. Belongs with the Evaluation/Benchmarking phases
+    (docs/05-task.md's later benchmark phase), not this one.
 
-[ ] Precision
+[ ] Precision — same reason as Recall.
 
-[ ] Average Similarity
+[x] Average Similarity (avg/min/max persisted per retrieval, exposed via the API and playground)
 
-[ ] Latency
+[x] Latency (measured wall-clock time for embed+search, persisted as `latency_ms`)
 
 ---
 
 Frontend
 
-[ ] Retrieval Playground
+[x] Retrieval Playground (`frontend/src/components/retrieval/retrieval-playground.tsx`, nested
+    under a ready vector index's "Retrieve" toggle in the Vector Index Explorer)
 
-[ ] Similarity Viewer
+[x] Similarity Viewer (per-result score shown in the results list)
 
-[ ] Result Inspector
+[x] Result Inspector (ranked chunk text/heading/page/score list, toggled per query)
 
 ---
 
 Testing
 
-[ ] Recall Tests
+[ ] Recall Tests — blocked on the same missing ground-truth dataset as the Recall metric above.
 
-[ ] Latency Tests
+[x] Latency Tests (latency_ms is measured and asserted non-null in
+    `worker/tests/test_execute_retrieval.py`; no fixed-threshold assertion, since CI/local hardware
+    speed varies and a flaky timing threshold would be worse than no threshold)
 
-[ ] Large Dataset Tests
+[ ] Large Dataset Tests — no synthetic large corpus exists in this environment; correctness is
+    verified against small real documents (unit/integration tests) and a live e2e document instead
+    of a performance/scale benchmark.
 
 ---
 

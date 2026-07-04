@@ -19,6 +19,7 @@ from common.db import SessionLocal
 from index_worker.providers.base import (
     ProviderNotConfiguredError,
     UnsupportedIndexTypeError,
+    UnsupportedMetricError,
     VectorRecord,
 )
 from index_worker.providers.chroma_provider import ChromaProvider
@@ -94,6 +95,37 @@ def test_qdrant_rejects_ivf_flat():
         provider.create_or_rebuild(f"test-{uuid.uuid4()}", "ivf_flat", 8, [])
 
 
+@pytest.mark.skipif(not _qdrant_up, reason="qdrant is not reachable in this environment")
+def test_qdrant_search_finds_nearest_and_respects_metadata_filter():
+    provider = QdrantProvider(_settings.qdrant_url)
+    namespace = f"test-{uuid.uuid4()}"
+    near_id, far_id = str(uuid.uuid4()), str(uuid.uuid4())
+    records = [
+        VectorRecord(chunk_id=near_id, vector=[1.0, 0.0], metadata={"language": "en"}),
+        VectorRecord(chunk_id=far_id, vector=[0.0, 1.0], metadata={"language": "fr"}),
+    ]
+    provider.create_or_rebuild(namespace, "hnsw", 2, records)
+
+    hits = provider.search(namespace, [1.0, 0.0], top_k=2, metric="cosine",
+                            score_threshold=None, metadata_filter=None)
+    assert hits[0].chunk_id == near_id
+    assert hits[0].score > hits[1].score
+
+    filtered = provider.search(namespace, [1.0, 0.0], top_k=2, metric="cosine",
+                                score_threshold=None, metadata_filter={"language": "fr"})
+    assert [hit.chunk_id for hit in filtered] == [far_id]
+
+    provider.delete(namespace)
+
+
+@pytest.mark.skipif(not _qdrant_up, reason="qdrant is not reachable in this environment")
+def test_qdrant_search_rejects_non_cosine_metric():
+    provider = QdrantProvider(_settings.qdrant_url)
+    with pytest.raises(UnsupportedMetricError):
+        provider.search(f"test-{uuid.uuid4()}", [1.0, 0.0], top_k=1, metric="dot",
+                         score_threshold=None, metadata_filter=None)
+
+
 @pytest.mark.skipif(not _chroma_up, reason="chroma is not reachable in this environment")
 def test_chroma_create_stats_delete_round_trip():
     provider = ChromaProvider(_settings.chroma_url)
@@ -116,6 +148,37 @@ def test_chroma_rejects_flat():
     provider = ChromaProvider(_settings.chroma_url)
     with pytest.raises(UnsupportedIndexTypeError):
         provider.create_or_rebuild(f"test-{uuid.uuid4()}", "flat", 8, [])
+
+
+@pytest.mark.skipif(not _chroma_up, reason="chroma is not reachable in this environment")
+def test_chroma_search_finds_nearest_and_respects_metadata_filter():
+    provider = ChromaProvider(_settings.chroma_url)
+    namespace = f"test-{uuid.uuid4()}"
+    near_id, far_id = str(uuid.uuid4()), str(uuid.uuid4())
+    records = [
+        VectorRecord(chunk_id=near_id, vector=[1.0, 0.0], metadata={"language": "en"}),
+        VectorRecord(chunk_id=far_id, vector=[0.0, 1.0], metadata={"language": "fr"}),
+    ]
+    provider.create_or_rebuild(namespace, "hnsw", 2, records)
+
+    hits = provider.search(namespace, [1.0, 0.0], top_k=2, metric="cosine",
+                            score_threshold=None, metadata_filter=None)
+    assert hits[0].chunk_id == near_id
+    assert hits[0].score > hits[1].score
+
+    filtered = provider.search(namespace, [1.0, 0.0], top_k=2, metric="cosine",
+                                score_threshold=None, metadata_filter={"language": "fr"})
+    assert [hit.chunk_id for hit in filtered] == [far_id]
+
+    provider.delete(namespace)
+
+
+@pytest.mark.skipif(not _chroma_up, reason="chroma is not reachable in this environment")
+def test_chroma_search_rejects_non_cosine_metric():
+    provider = ChromaProvider(_settings.chroma_url)
+    with pytest.raises(UnsupportedMetricError):
+        provider.search(f"test-{uuid.uuid4()}", [1.0, 0.0], top_k=1, metric="euclidean",
+                         score_threshold=None, metadata_filter=None)
 
 
 def test_pinecone_provider_raises_when_not_configured():

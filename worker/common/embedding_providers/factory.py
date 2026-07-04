@@ -6,16 +6,22 @@ external dependency beyond the ONNX weights being cached. Cloud
 providers (openai, voyage, jina) raise `ProviderNotConfiguredError` when
 their API key isn't set, which `embedding_worker.tasks` surfaces as a
 `FAILED_EMBED` document status rather than crashing the whole batch.
+
+Lives in `common` (not `embedding_worker`) so both `embedding_worker`
+(batch embedding at ingest time) and `retrieval_worker` (Phase 9,
+single-text query embedding at search time) can use it without either
+one importing the other's package — the same promotion Phase 7 applied
+to `common.tokenizer`.
 """
 
 from common.config import get_worker_settings
-from embedding_worker.providers.base import EmbeddingProvider
-from embedding_worker.providers.cloud import (
+from common.embedding_providers.base import EmbeddingProvider
+from common.embedding_providers.cloud import (
     JinaEmbeddingProvider,
     OpenAIEmbeddingProvider,
     VoyageEmbeddingProvider,
 )
-from embedding_worker.providers.local import LOCAL_MODEL_NAMES, LocalEmbeddingProvider
+from common.embedding_providers.local import LOCAL_MODEL_NAMES, LocalEmbeddingProvider
 
 DEFAULT_PROVIDER = "bge"
 

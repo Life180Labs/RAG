@@ -13,7 +13,9 @@ import chromadb
 
 from index_worker.providers.base import (
     IndexStats,
+    SearchHit,
     UnsupportedIndexTypeError,
+    UnsupportedMetricError,
     VectorIndexProvider,
     VectorRecord,
 )
@@ -72,3 +74,42 @@ class ChromaProvider(VectorIndexProvider):
     def health_check(self) -> bool:
         self._client.heartbeat()
         return True
+
+    def search(
+        self,
+        namespace: str,
+        query_vector: list[float],
+        top_k: int,
+        metric: str,
+        score_threshold: float | None,
+        metadata_filter: dict | None,
+    ) -> list[SearchHit]:
+        if metric != "cosine":
+            raise UnsupportedMetricError(
+                "chroma collections are always built with a fixed cosine metric "
+                f"(requested '{metric}')."
+            )
+        try:
+            collection = self._client.get_collection(namespace)
+        except Exception:  # noqa: BLE001 - collection doesn't exist
+            return []
+
+        results = collection.query(
+            query_embeddings=[query_vector],
+            n_results=top_k,
+            where=metadata_filter or None,
+            include=["metadatas", "distances"],
+        )
+        hits = []
+        for chunk_id, distance, metadata in zip(
+            results["ids"][0], results["distances"][0], results["metadatas"][0], strict=True
+        ):
+            # Chroma's "hnsw:space": "cosine" collections report distance
+            # as 1 - cosine_similarity, so invert it back to a similarity
+            # score for a "higher is better" contract consistent with
+            # every other provider.
+            score = 1 - distance
+            if score_threshold is not None and score < score_threshold:
+                continue
+            hits.append(SearchHit(chunk_id=chunk_id, score=score, metadata=metadata or {}))
+        return hits

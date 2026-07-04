@@ -82,3 +82,13 @@ def enqueue_delete_index(vector_index_id: str) -> None:
         logger.error(
             "enqueue_delete_index_failed", vector_index_id=vector_index_id, error=str(exc)
         )
+
+
+def enqueue_execute_retrieval(retrieval_id: str) -> None:
+    client = _build_client()
+    try:
+        client.send_task("retrieval_worker.execute_retrieval", args=[retrieval_id])
+    except Exception as exc:  # noqa: BLE001 - enqueue failure must never break the response
+        logger.error(
+            "enqueue_execute_retrieval_failed", retrieval_id=retrieval_id, error=str(exc)
+        )

@@ -25,9 +25,9 @@ from sqlalchemy import text
 
 from common.celery_app import celery_app
 from common.db import SessionLocal
+from common.embedding_providers.base import ProviderNotConfiguredError
+from common.embedding_providers.factory import DEFAULT_PROVIDER, default_model, get_provider
 from common.logging import get_logger
-from embedding_worker.providers.base import ProviderNotConfiguredError
-from embedding_worker.providers.factory import DEFAULT_PROVIDER, default_model, get_provider
 
 logger = get_logger(__name__)
 

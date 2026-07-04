@@ -698,7 +698,71 @@ vectors in an external store, so the worker must reach that store first.
 
 # 19. Retrieval Schema
 
-**Pending — Retrieval Architecture phase.**
+Implemented in `backend/app/models/retrieval.py`, migration `0010_add_retrieval_tables`.
+
+```
+retrievals
+  id                   UUID PK
+  vector_index_id      UUID FK -> vector_indexes.id, ON DELETE CASCADE, indexed
+  document_id          UUID FK -> documents.id, ON DELETE CASCADE, indexed
+  query_text           varchar(2000)
+  top_k                integer, default 10
+  score_threshold      float, nullable
+  similarity_metric    enum(cosine, dot, euclidean), default cosine
+  metadata_filter      jsonb, nullable                 -- exact-match filter on heading/page/language
+  status               enum(pending, completed, failed)
+  status_message       varchar(500), nullable
+  result_count         integer, default 0
+  avg_similarity       float, nullable
+  min_similarity       float, nullable
+  max_similarity       float, nullable
+  latency_ms           integer, nullable
+  created_by           UUID FK -> users.id, ON DELETE SET NULL, nullable
+  created_at / updated_at   timestamptz
+
+retrieval_results
+  id             UUID PK
+  retrieval_id   UUID FK -> retrievals.id, ON DELETE CASCADE, indexed
+  chunk_id       UUID FK -> chunks.id, ON DELETE CASCADE, indexed
+  rank           integer                    -- 1-indexed position in the ranked result list
+  score          float                      -- normalized so higher is always better (see below)
+```
+
+A `Retrieval` always targets one `VectorIndex` (never a whole repository in a single call) — the
+same constraint `embedding.py` documents for indexing: pgvector's zero-padded columns make
+cross-embedding-version vector comparison meaningless, so a query is always embedded with the
+same provider/model that produced the target index, then searched against that one index.
+
+Unlike `VectorIndex`/`EmbeddingVersion` (rebuilt in place, id reused), a `Retrieval` is a
+point-in-time query execution — re-running "the same" query text creates a new row rather than
+updating one, since two executions can legitimately return different results (index rebuilt in
+between, non-deterministic ANN search). No regenerate-reuses-id handling applies here.
+
+Row lifecycle mirrors `Document` on upload, not `VectorIndex` on build: the backend creates the
+row synchronously (status=PENDING, just the caller's query parameters, no AI computation yet) via
+a plain repository `.add()`, then enqueues `retrieval_worker.execute_retrieval(retrieval_id)`,
+which embeds the query, runs the search, and updates the row to COMPLETED/FAILED plus inserts the
+`retrieval_results` rows. This is a plain CRUD create — not "AI pipeline execution" — since no
+computation has happened yet at that point, unlike chunk/embedding/index rows which only ever get
+written by the worker once real results exist.
+
+**Similarity metric support is asymmetric across providers**, the same "document real limitations
+honestly" pattern already established for index_type in section 18: PgVector can select
+cosine/dot/euclidean per query (raw vectors always live in Postgres, so any of its three distance
+operators — `<=>`, `<#>`, `<->` — is a valid query regardless of which operator class the ANN
+index itself used), but Qdrant/Chroma/Pinecone all fix their distance metric to cosine at
+collection/index creation time (Phase 8 never exposed a metric choice there), so requesting
+`dot`/`euclidean` against those three fails with a clear "not supported" error rather than
+silently ignoring the request.
+
+`score` is always normalized so *higher is better* regardless of metric — cosine/dot similarity as
+computed, but euclidean distance is negated — so `score_threshold` ("keep hits with score >=
+threshold") means the same thing for every metric.
+
+`metadata_filter` is an exact-match equality filter, scoped to exactly the three keys Phase 8
+attaches at index build time (`heading`, `page`, `language`) — not an arbitrary key/value filter —
+applied natively per provider (a join back to `chunks` for PgVector, since that's the original
+source of that data; each provider's own upserted payload for Qdrant/Chroma/Pinecone).
 
 # 20. Prompt Schema
 

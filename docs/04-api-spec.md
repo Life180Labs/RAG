@@ -359,7 +359,36 @@ provider, not a request validation error: an unsupported combination also surfac
 
 # 15. Retrieval APIs
 
-**Pending — Retrieval Architecture phase.**
+Nested under document and vector index. Create requires Document VIEWER+ (running a search is a
+read-oriented action, unlike building/deleting an index, which require ADMIN); reads require
+VIEWER+.
+
+| Method | Path | Auth | Notes |
+|--------|------|----------|---------|
+| POST   | `/api/v1/documents/{document_id}/vector-indexes/{vector_index_id}/retrievals` | Document VIEWER | Run a dense retrieval query; body `{"query_text": "...", "top_k": 10, "score_threshold": null, "similarity_metric": "cosine", "metadata_filter": null}` (only `query_text` required) |
+| GET    | `/api/v1/documents/{document_id}/vector-indexes/{vector_index_id}/retrievals` | Document VIEWER | List past retrievals against this index, most recent first; `?limit=50&offset=0` |
+| GET    | `/api/v1/documents/{document_id}/vector-indexes/{vector_index_id}/retrievals/{retrieval_id}` | Document VIEWER | Get one retrieval's status and aggregate stats |
+| GET    | `/api/v1/documents/{document_id}/vector-indexes/{vector_index_id}/retrievals/{retrieval_id}/results` | Document VIEWER | Get the ranked candidate list (chunk text, heading, page, rank, score) |
+
+`POST .../retrievals` differs from Phase 8's index create in one important way: it does **not**
+return `{"enqueued": true}` — it synchronously creates and returns the full `Retrieval` row
+(`status: "pending"`) in the same request, then enqueues `retrieval_worker.execute_retrieval` in
+the background. This mirrors how `POST .../documents` returns the created `Document` row
+immediately (status `uploaded`) rather than an enqueue acknowledgment — see
+docs/03-database.md section 19 for why a Retrieval's row-creation is plain CRUD rather than
+enqueue-only. Poll `GET .../retrievals/{retrieval_id}` until `status` leaves `"pending"`.
+
+`similarity_metric` accepts `cosine` (default), `dot`, `euclidean` — PgVector supports all three at
+query time, but Qdrant/Chroma/Pinecone indexes are always built cosine-only (Phase 8 never exposed
+a metric choice at build time), so requesting `dot`/`euclidean` against one of those three fails
+the retrieval with `status: "failed"` and an explanatory `status_message`, the same
+worker-surfaces-the-real-limitation contract Phase 8 uses for unsupported `index_type`s.
+
+`metadata_filter` is an optional exact-match object over `heading`/`page`/`language` (the same keys
+Phase 8 attaches to every chunk at index build time) — e.g. `{"language": "en"}`.
+
+`score` in the results response is always normalized so *higher is better* regardless of metric —
+see docs/03-database.md section 19.
 
 # 16. Reranking APIs
 

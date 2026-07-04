@@ -4,7 +4,7 @@ Real HTTP integrations against each provider's documented embeddings
 API — not stubs — but this dev environment has no paid API keys
 configured for any of them, so they're exercised live only when the
 corresponding `{PROVIDER}_API_KEY` env var is set (see
-embedding_worker/tests, which skip via `pytest.mark.skipif` rather than
+worker/tests, which skip via `pytest.mark.skipif` rather than
 mocking the HTTP layer, the same convention `test_ocr.py` uses for
 missing local binaries).
 
@@ -19,12 +19,12 @@ import time
 import httpx
 from openai import OpenAI
 
-from common.tokenizer import count_tokens
-from embedding_worker.providers.base import (
+from common.embedding_providers.base import (
     EmbeddingProvider,
     EmbeddingResult,
     ProviderNotConfiguredError,
 )
+from common.tokenizer import count_tokens
 
 # USD per 1,000 tokens, per model.
 OPENAI_PRICING_PER_1K: dict[str, float] = {

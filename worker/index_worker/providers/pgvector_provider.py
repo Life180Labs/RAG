@@ -24,13 +24,38 @@ from sqlalchemy.orm import Session
 
 from index_worker.providers.base import (
     IndexStats,
+    SearchHit,
     UnsupportedIndexTypeError,
+    UnsupportedMetricError,
     VectorIndexProvider,
     VectorRecord,
 )
 
 _SUPPORTED_INDEX_TYPES = {"hnsw", "ivf_flat", "flat"}
 _PG_ACCESS_METHOD = {"hnsw": "hnsw", "ivf_flat": "ivfflat"}
+
+# Must match EMBEDDING_DIM_MAX in backend/app/models/embedding.py — a
+# query vector must be zero-padded to the same fixed column width the
+# stored embeddings use, or pgvector's distance operators reject the
+# dimension mismatch.
+_EMBEDDING_DIM_MAX = 1536
+
+# pgvector distance operator per metric, and the score expression
+# template that turns its raw output into a "higher is better" score
+# (see base.VectorIndexProvider.search): cosine distance -> similarity,
+# dot product's `<#>` is already negative so negating gives the true
+# inner product, euclidean distance is negated so closer = higher score.
+_METRIC_SCORE_EXPR: dict[str, str] = {
+    "cosine": "1 - (e.embedding <=> '{query_literal}'::vector)",
+    "dot": "-(e.embedding <#> '{query_literal}'::vector)",
+    "euclidean": "-(e.embedding <-> '{query_literal}'::vector)",
+}
+# Only heading/page/language are ever attached as chunk metadata (Phase
+# 8's index_worker.tasks), so pgvector's own metadata_filter can join
+# straight to the chunks table these came from rather than needing its
+# own copy of that data (unlike Qdrant/Chroma/Pinecone, which only have
+# their own upserted copy to filter against).
+_FILTERABLE_CHUNK_COLUMNS = {"heading", "page", "language"}
 
 
 def _index_name(namespace: str) -> str:
@@ -117,3 +142,70 @@ class PgVectorProvider(VectorIndexProvider):
     def health_check(self) -> bool:
         self._session.execute(text("SELECT 1"))
         return True
+
+    def search(
+        self,
+        namespace: str,
+        query_vector: list[float],
+        top_k: int,
+        metric: str,
+        score_threshold: float | None,
+        metadata_filter: dict | None,
+    ) -> list[SearchHit]:
+        if metric not in _METRIC_SCORE_EXPR:
+            raise UnsupportedMetricError(f"pgvector does not support metric '{metric}'.")
+
+        embedding_version_id = str(uuid.UUID(namespace))
+        padded = list(query_vector) + [0.0] * (_EMBEDDING_DIM_MAX - len(query_vector))
+        # Same reasoning as create_or_rebuild's embedded namespace literal:
+        # psycopg3 can't infer a bound parameter's vector type here either,
+        # and this literal is built from floats we already validated by
+        # padding to a fixed length, never raw user text.
+        query_literal = "[" + ",".join(repr(float(x)) for x in padded) + "]"
+        score_expr = _METRIC_SCORE_EXPR[metric].format(query_literal=query_literal)
+
+        filter_clauses = []
+        filter_params: dict = {}
+        for key, value in (metadata_filter or {}).items():
+            if key not in _FILTERABLE_CHUNK_COLUMNS:
+                continue
+            filter_clauses.append(f"c.{key} = :filter_{key}")
+            filter_params[f"filter_{key}"] = value
+        filter_sql = "".join(f" AND {clause}" for clause in filter_clauses)
+
+        rows = self._session.execute(
+            text(
+                f"SELECT e.chunk_id, ({score_expr}) AS score, "
+                "c.heading, c.page, c.language "
+                "FROM embeddings e JOIN chunks c ON c.id = e.chunk_id "
+                "WHERE e.embedding_version_id = :embedding_version_id AND e.status = 'READY'"
+                f"{filter_sql} "
+                "ORDER BY score DESC "
+                "LIMIT :top_k"
+            ),
+            {
+                "embedding_version_id": embedding_version_id,
+                "top_k": top_k,
+                **filter_params,
+            },
+        ).all()
+
+        hits = [
+            SearchHit(
+                chunk_id=str(row.chunk_id),
+                score=row.score,
+                metadata={
+                    k: v
+                    for k, v in {
+                        "heading": row.heading,
+                        "page": row.page,
+                        "language": row.language,
+                    }.items()
+                    if v is not None
+                },
+            )
+            for row in rows
+        ]
+        if score_threshold is not None:
+            hits = [hit for hit in hits if hit.score >= score_threshold]
+        return hits

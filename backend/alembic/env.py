@@ -18,6 +18,7 @@ from app.models import (  # noqa: F401
     organization,
     project,
     repository,
+    retrieval,
     session,
     user,
     vector_index,

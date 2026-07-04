@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 
+import { RetrievalPlayground } from '@/components/retrieval/retrieval-playground';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -38,6 +39,7 @@ export function VectorIndexExplorer({
   const [selectedProvider, setSelectedProvider] = useState<VectorIndexProviderName>('pgvector');
   const [selectedIndexType, setSelectedIndexType] = useState<VectorIndexType>('hnsw');
   const [error, setError] = useState<string | null>(null);
+  const [expandedVectorIndexId, setExpandedVectorIndexId] = useState<string | null>(null);
 
   const { data: indexes, isLoading } = useVectorIndexes(documentId, chunkSetId, embeddingVersionId);
   const createOrRebuild = useCreateOrRebuildIndex(documentId, chunkSetId, embeddingVersionId);
@@ -113,22 +115,42 @@ export function VectorIndexExplorer({
       {indexes && indexes.length > 0 && (
         <ul className="divide-border divide-y text-sm" data-testid="vector-indexes-list">
           {indexes.map((index) => (
-            <li key={index.id} className="flex flex-wrap items-center justify-between gap-2 py-1">
-              <span className="flex flex-wrap items-center gap-2">
-                <span className="font-medium">{index.provider}</span>
-                <span className="text-muted-foreground text-xs">{index.index_type}</span>
-                <span className="text-muted-foreground text-xs">
-                  {index.vector_count} vectors
-                  {index.build_duration_ms !== null ? ` · ${index.build_duration_ms}ms` : ''}
+            <li key={index.id} className="py-1">
+              <div className="flex flex-wrap items-center justify-between gap-2">
+                <span className="flex flex-wrap items-center gap-2">
+                  <span className="font-medium">{index.provider}</span>
+                  <span className="text-muted-foreground text-xs">{index.index_type}</span>
+                  <span className="text-muted-foreground text-xs">
+                    {index.vector_count} vectors
+                    {index.build_duration_ms !== null ? ` · ${index.build_duration_ms}ms` : ''}
+                  </span>
+                  <Badge variant={statusVariant(index.status)}>{index.status}</Badge>
+                  {index.status_message && (
+                    <span className="text-destructive text-xs">{index.status_message}</span>
+                  )}
                 </span>
-                <Badge variant={statusVariant(index.status)}>{index.status}</Badge>
-                {index.status_message && (
-                  <span className="text-destructive text-xs">{index.status_message}</span>
-                )}
-              </span>
-              <Button variant="ghost" size="sm" onClick={() => handleDelete(index.id)}>
-                Delete
-              </Button>
+                <span className="flex items-center gap-2">
+                  {index.status === 'ready' && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() =>
+                        setExpandedVectorIndexId((current) =>
+                          current === index.id ? null : index.id,
+                        )
+                      }
+                    >
+                      Retrieve
+                    </Button>
+                  )}
+                  <Button variant="ghost" size="sm" onClick={() => handleDelete(index.id)}>
+                    Delete
+                  </Button>
+                </span>
+              </div>
+              {expandedVectorIndexId === index.id && (
+                <RetrievalPlayground documentId={documentId} vectorIndexId={index.id} />
+              )}
             </li>
           ))}
         </ul>

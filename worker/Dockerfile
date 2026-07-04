@@ -17,7 +17,7 @@ COPY scheduler ./scheduler
 RUN pip install --no-cache-dir --upgrade pip \
     && pip install --no-cache-dir --prefix=/install .
 RUN PYTHONPATH=/install/lib/python3.11/site-packages python -c "import tiktoken; tiktoken.get_encoding('cl100k_base')"
-RUN PYTHONPATH=/install/lib/python3.11/site-packages:. python -c "from embedding_worker.providers.local import LOCAL_MODEL_NAMES, _load_model; _load_model(LOCAL_MODEL_NAMES['bge'])"
+RUN PYTHONPATH=/install/lib/python3.11/site-packages:. python -c "from common.embedding_providers.local import LOCAL_MODEL_NAMES, _load_model; _load_model(LOCAL_MODEL_NAMES['bge'])"
 
 FROM python:3.11-slim AS runtime
 WORKDIR /app

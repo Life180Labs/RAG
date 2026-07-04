@@ -12,11 +12,21 @@ Qdrant exposes this way, so requesting them raises
 """
 
 from qdrant_client import QdrantClient
-from qdrant_client.http.models import Distance, HnswConfigDiff, PointStruct, VectorParams
+from qdrant_client.http.models import (
+    Distance,
+    FieldCondition,
+    Filter,
+    HnswConfigDiff,
+    MatchValue,
+    PointStruct,
+    VectorParams,
+)
 
 from index_worker.providers.base import (
     IndexStats,
+    SearchHit,
     UnsupportedIndexTypeError,
+    UnsupportedMetricError,
     VectorIndexProvider,
     VectorRecord,
 )
@@ -76,3 +86,37 @@ class QdrantProvider(VectorIndexProvider):
     def health_check(self) -> bool:
         self._client.get_collections()
         return True
+
+    def search(
+        self,
+        namespace: str,
+        query_vector: list[float],
+        top_k: int,
+        metric: str,
+        score_threshold: float | None,
+        metadata_filter: dict | None,
+    ) -> list[SearchHit]:
+        if metric != "cosine":
+            raise UnsupportedMetricError(
+                "qdrant collections are always built with a fixed cosine metric "
+                f"(requested '{metric}')."
+            )
+        query_filter = None
+        if metadata_filter:
+            query_filter = Filter(
+                must=[
+                    FieldCondition(key=key, match=MatchValue(value=value))
+                    for key, value in metadata_filter.items()
+                ]
+            )
+        response = self._client.query_points(
+            collection_name=namespace,
+            query=query_vector,
+            limit=top_k,
+            query_filter=query_filter,
+            score_threshold=score_threshold,
+        )
+        return [
+            SearchHit(chunk_id=str(point.id), score=point.score, metadata=point.payload or {})
+            for point in response.points
+        ]

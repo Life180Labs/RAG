@@ -20,8 +20,8 @@ from functools import lru_cache
 
 from fastembed import TextEmbedding
 
+from common.embedding_providers.base import EmbeddingProvider, EmbeddingResult
 from common.tokenizer import count_tokens
-from embedding_worker.providers.base import EmbeddingProvider, EmbeddingResult
 
 # fastembed's exact supported model name per our three local providers,
 # per `TextEmbedding.list_supported_models()` on the pinned fastembed

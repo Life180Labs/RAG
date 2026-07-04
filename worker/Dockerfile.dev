@@ -13,6 +13,6 @@ RUN python -c "import tiktoken; tiktoken.get_encoding('cl100k_base')"
 # build time to keep the image/build reasonable; e5/nomic are real,
 # available providers too but download on first use instead (documented
 # trade-off, not a functional gap).
-RUN python -c "from embedding_worker.providers.local import LOCAL_MODEL_NAMES, _load_model; _load_model(LOCAL_MODEL_NAMES['bge'])"
+RUN python -c "from common.embedding_providers.local import LOCAL_MODEL_NAMES, _load_model; _load_model(LOCAL_MODEL_NAMES['bge'])"
 
 CMD ["celery", "-A", "common.celery_app", "worker", "--loglevel=info", "--concurrency=2"]

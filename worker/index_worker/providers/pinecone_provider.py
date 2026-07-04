@@ -17,7 +17,9 @@ import httpx
 from index_worker.providers.base import (
     IndexStats,
     ProviderNotConfiguredError,
+    SearchHit,
     UnsupportedIndexTypeError,
+    UnsupportedMetricError,
     VectorIndexProvider,
     VectorRecord,
 )
@@ -118,3 +120,39 @@ class PineconeProvider(VectorIndexProvider):
         response = httpx.get(f"{_CONTROL_PLANE}/indexes", headers=self._headers, timeout=10.0)
         response.raise_for_status()
         return True
+
+    def search(
+        self,
+        namespace: str,
+        query_vector: list[float],
+        top_k: int,
+        metric: str,
+        score_threshold: float | None,
+        metadata_filter: dict | None,
+    ) -> list[SearchHit]:
+        if metric != "cosine":
+            raise UnsupportedMetricError(
+                "pinecone indexes are always built with a fixed cosine metric "
+                f"(requested '{metric}')."
+            )
+        host = self._index_host(namespace)
+        if host is None:
+            return []
+
+        payload: dict = {"vector": query_vector, "topK": top_k, "includeMetadata": True}
+        if metadata_filter:
+            payload["filter"] = metadata_filter
+        response = httpx.post(
+            f"https://{host}/query", headers=self._headers, json=payload, timeout=30.0
+        )
+        response.raise_for_status()
+
+        hits = []
+        for match in response.json().get("matches", []):
+            score = match["score"]
+            if score_threshold is not None and score < score_threshold:
+                continue
+            hits.append(
+                SearchHit(chunk_id=match["id"], score=score, metadata=match.get("metadata") or {})
+            )
+        return hits
