@@ -452,7 +452,38 @@ resource with its own lifecycle. See section 15's "Reranking (Phase 13)" entry.
 
 # 17. Prompt APIs
 
-**Pending — Prompt Builder phase.**
+Phase 14. Two resource families, each following an existing pattern in this API rather than
+inventing a new one:
+
+**Prompt templates** (repository-scoped, same create-requires-repository-ADMIN+/read-requires-
+VIEWER+ pattern as `documents.py`):
+
+- `POST /repositories/{repository_id}/prompt-templates` — always creates a **new version** under
+  `name` (`version = max(existing for that name) + 1`); there is no PATCH/PUT for an existing
+  version, since docs/02-architecture.md section 79 requires versions to coexist for experiment
+  comparison, not be overwritten.
+- `GET /repositories/{repository_id}/prompt-templates` — latest version per name.
+- `GET /repositories/{repository_id}/prompt-templates/{name}/versions` — full version history for
+  one template name, oldest first.
+- `GET /repositories/{repository_id}/prompt-templates/{template_id}` — one version by id.
+- `POST /repositories/{repository_id}/prompt-templates/{template_id}/archive` — sets
+  `is_active=false`; the row is never deleted, since past `Prompt` rows may still reference it.
+
+**Prompts** (nested under document/vector-index/retrieval, mirroring `retrievals.py`; building a
+prompt is a read-oriented action over an already-completed retrieval, so it requires Document
+VIEWER+ like creating a retrieval does, not ADMIN+):
+
+- `POST .../retrievals/{retrieval_id}/prompts` — builds and returns a `Prompt` **synchronously**
+  (no enqueue, no polling) — unlike Phase 9's `POST .../retrievals`, there is no Celery task here;
+  token counting and context assembly are deterministic CPU-bound computation over data already
+  fetched by the request. Body: either `prompt_template_id` or an inline `system_prompt` (422 if
+  neither given), plus optional `formatting_instructions`/`output_schema` overrides,
+  `model_context_window` (default 8192), `response_reserve_tokens` (default 1024),
+  `order_by_page` (default false — see section 20's Context Window Builder note). 409
+  `RETRIEVAL_NOT_COMPLETED` if the underlying retrieval hasn't finished yet.
+- `GET .../retrievals/{retrieval_id}/prompts` — all prompts built from that retrieval, newest first.
+- `GET .../retrievals/{retrieval_id}/prompts/{prompt_id}` — one prompt, including
+  `rendered_prompt`, `citations`, and the full token breakdown.
 
 # 18. LLM APIs
 

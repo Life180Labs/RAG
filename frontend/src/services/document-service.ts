@@ -5,6 +5,9 @@ import type { Document, DocumentVersion } from '@/types/document';
 export const listDocuments = (repositoryId: string, signal?: AbortSignal) =>
   apiGet<ApiSuccessResponse<Document[]>>(`/repositories/${repositoryId}/documents`, signal);
 
+export const getDocument = (documentId: string, signal?: AbortSignal) =>
+  apiGet<ApiSuccessResponse<Document>>(`/documents/${documentId}`, signal);
+
 export const listDocumentVersions = (documentId: string, signal?: AbortSignal) =>
   apiGet<ApiSuccessResponse<DocumentVersion[]>>(`/documents/${documentId}/versions`, signal);
 

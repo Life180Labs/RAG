@@ -11,6 +11,15 @@ export function useDocuments(repositoryId: string) {
   });
 }
 
+export function useDocument(documentId: string | null) {
+  return useQuery({
+    queryKey: ['documents', documentId],
+    queryFn: ({ signal }) => documentService.getDocument(documentId as string, signal),
+    select: (response) => response.data,
+    enabled: Boolean(documentId),
+  });
+}
+
 export function useDocumentVersions(documentId: string | null) {
   return useQuery({
     queryKey: ['documents', documentId, 'versions'],

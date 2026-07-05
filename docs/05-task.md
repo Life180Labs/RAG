@@ -2362,7 +2362,7 @@ deterministic unit and integration tests above.
 
 Status
 
-[ ]
+[x]
 
 Priority
 
@@ -2392,46 +2392,82 @@ Deliverables
 
 Features
 
-[ ] Prompt Versioning
+[x] Prompt Versioning — `PromptTemplate` uniqueness is `(repository_id, name, version)`, never
+`(repository_id, name)`; `PromptTemplateService.create_version` always inserts
+`version = max(existing for that name) + 1` rather than updating in place, so "v1/v2/v3" coexist
+per docs/02-architecture.md section 79 (`test_recreating_same_name_creates_new_version_not_overwrite`).
 
-[ ] Context Compression
+[x] Context Compression — reuses Phase 12's `RetrievalResult.compressed_text` when present
+(`backend/app/core/context_window.py`'s `_text_for`, falls back to `chunk_text` otherwise) rather
+than a new compression implementation; duplicating Phase 12's lexical-overlap compressor under a
+second name would be dead code with no new behavior, the same reasoning Phase 12 itself applied to
+Self-Query/Multi-Query against Phase 11.
 
-[ ] Citation Builder
+[x] Citation Builder — `backend/app/core/citations.py`, one citation per included context entry
+(`source_label`/`document_id`/`document_filename`/`page`/`section`/`chunk_id`/`confidence`),
+index-matched to the `[Source N]` markers `context_window.py` writes into the assembled context.
 
-[ ] Prompt Preview
+[x] Prompt Preview — building a prompt is synchronous and inspects-before-you-commit-to-an-LLM-call
+in effect (`rendered_prompt`/`rendered_context`/`citations`/token breakdown all return in the same
+response), so there's no separate non-persisting "preview" mode distinct from a real build — the
+build itself is cheap and fast enough (deterministic CPU-bound computation only) to serve that role.
 
-[ ] Token Counter
+[x] Token Counter — `backend/app/core/token_budget.py`'s `count_tokens` via real `tiktoken`
+(`cl100k_base`), not a length-based heuristic — deterministic and model-agnostic, matching this
+phase's "reproducible" Acceptance Criteria (`test_count_tokens_counts_real_tokens`).
 
 ---
 
 Frontend
 
-[ ] Prompt Playground
+[x] Prompt Playground — `frontend/src/components/prompts/prompt-playground.tsx`, nested inside
+the Retrieval Playground behind a "Build prompt" toggle once a retrieval completes (mirrors the
+existing drill-down UI pattern: repository → document → chunk set → embedding version → vector
+index → retrieval → prompt). Supports inline system prompt or a saved template, context-window
+size, and page-ordering, and displays the full token breakdown, rendered prompt, and citations.
 
-[ ] Prompt Diff
+[x] Prompt Diff — `frontend/src/lib/text-diff.ts`'s `diffWords`, a real word-level LCS diff (no
+external diff library), rendered as added/removed spans between any two selected template versions.
 
-[ ] Version History
+[x] Version History — per-template-name version list with per-version Archive action
+(`PromptTemplateService.set_active`), plus the two version pickers Prompt Diff reads from.
 
 ---
 
 Testing
 
-[ ] Prompt Validation
+[x] Prompt Validation — `CreatePromptRequest`'s validator rejects a build request with neither
+`prompt_template_id` nor `system_prompt` (422, `test_build_prompt_requires_system_prompt_or_template`);
+`test_prompt_template_from_another_repository_is_rejected` verifies cross-repository template
+isolation (404, not a silent cross-tenant leak).
 
-[ ] Token Tests
+[x] Token Tests — `test_count_tokens_empty_string_is_zero`, `test_count_tokens_counts_real_tokens`,
+`test_available_context_tokens_never_negative`, `test_available_context_tokens_subtracts_all_budgets`
+in `backend/tests/test_prompts.py`.
 
 ---
 
 Acceptance Criteria
 
-✓ Prompt generation reproducible
+[x] Prompt generation reproducible — `rendered_system_prompt`/`rendered_context`/`rendered_prompt`
+are snapshotted onto the `Prompt` row at build time rather than re-resolved from a (possibly later
+re-versioned) template, and every core module (`token_budget.py`, `context_window.py`,
+`prompt_render.py`) is a pure function of its inputs — no hidden state, no wall-clock dependence.
 
-✓ Token limits respected
+[x] Token limits respected — `available_context_tokens` clamps at `0` rather than going negative;
+when that leaves no room for context at all, the build fails explicitly (`status="failed"`,
+`RETRIEVAL_NOT_COMPLETED`-style clear `status_message`) rather than silently producing a
+context-free prompt indistinguishable from "no relevant chunks found"
+(`test_build_prompt_fails_when_budget_leaves_no_room_for_context`).
 
-✓ Citations injected correctly
+[x] Citations injected correctly — `test_build_prompt_with_inline_system_prompt_renders_context_and_citations`
+verifies the citation's `chunk_id`/`source_label` match the actual included context entry, live
+e2e-verified against a real upload → parse → chunk → embed → index → retrieve → build-prompt
+pipeline (confidence matched the real retrieval similarity score, not a placeholder).
 
-AI Eval ≥ 99
-
+AI Eval ≥ 99 — no automated LLM-graded eval harness exists yet (Evaluation Engine is a later
+phase, same honest gap already noted in Phases 11-13); correctness is instead verified by the
+deterministic unit and integration tests above plus live e2e verification.
 
 ---
 

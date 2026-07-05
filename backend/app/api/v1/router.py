@@ -13,6 +13,7 @@ from app.api.v1 import (
     invitations,
     organizations,
     projects,
+    prompts,
     repositories,
     retrievals,
     users,
@@ -33,4 +34,5 @@ api_router.include_router(chunks.router)
 api_router.include_router(embeddings.router)
 api_router.include_router(vector_indexes.router)
 api_router.include_router(retrievals.router)
+api_router.include_router(prompts.router)
 api_router.include_router(invitations.router)

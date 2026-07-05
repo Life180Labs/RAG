@@ -928,7 +928,56 @@ since it's the more accurate signal.
 
 # 20. Prompt Schema
 
-**Pending — Prompt Builder phase.**
+Migration `0015_add_prompt_tables` adds two new tables — `prompt_templates` and `prompts` — the
+first genuinely new resource type since Phase 10 (every Phase 10-13 addition extended the existing
+`Retrieval`/`RetrievalResult` rows instead). Prompt construction is conceptually downstream of
+retrieval (it consumes a completed `Retrieval`'s ranked results), not another retrieval mode, so it
+gets its own tables rather than more opt-in columns on `retrievals`.
+
+**`prompt_templates`** is repository-scoped (`repository_id` FK, `ON DELETE CASCADE`).
+docs/02-architecture.md section 79 requires "Prompt v1/v2/v3" to coexist for experiment
+comparison, so unlike `embedding_versions` (Phase 7, which replaces its row in place on a
+same-provider+model re-run), creating a new version under an existing `name` always **inserts** a
+new row with `version = max(existing) + 1` — uniqueness is `(repository_id, name, version)`, never
+`(repository_id, name)`. `is_active` marks whether a version is still offered when building new
+prompts; archived versions are left in place (not deleted) since past `prompts` rows may still
+reference them, and reproducibility (this phase's Acceptance Criteria) requires that link to stay
+valid. Columns: `name`, `version`, `system_prompt`, `formatting_instructions` (nullable),
+`output_schema` (JSONB, nullable — for structured-output prompts), `is_active`, `created_by`.
+
+**`prompts`** is one built prompt, always tied to a single `retrieval_id` (`ON DELETE CASCADE`) —
+the Context Window Builder (section 77) explicitly assembles "the final context... after
+reranking", i.e. from that retrieval's already-ranked `retrieval_results` rows.
+`prompt_template_id` (`ON DELETE SET NULL`) is nullable to allow an ad-hoc prompt without a saved
+template, but the resolved system prompt/context/full prompt text is always **snapshotted** onto
+the row itself (`rendered_system_prompt`/`rendered_context`/`rendered_prompt`) rather than
+re-resolved from the template at read time — a template can gain new versions later, and
+reproducibility requires the exact text used at build time to stay stable regardless.
+
+Token accounting (Token Budget Manager, section 76) is first-class columns rather than one JSONB
+blob, matching this codebase's existing convention of dedicated columns for anything the frontend
+charts/inspects directly (e.g. `retrievals.avg_similarity`): `model_context_window`,
+`system_prompt_tokens`, `conversation_tokens`, `context_tokens`, `query_tokens`,
+`response_budget_tokens`, `total_tokens`. `conversation_tokens` is always `0` in this phase —
+persistent conversation memory is Phase 16, which doesn't exist yet — but the column exists now so
+Phase 16 can populate it without another migration, the same way `retrievals.detected_metadata_filter`
+anticipated Phase 11 while Phases 9-10 left it null.
+
+`citations` (Citation Engine, section 80) is JSONB — a list of `{source_label, chunk_id,
+document_id, document_filename, page, section, confidence}` objects — because its shape is a
+derived, display-only projection of data already living in normalized form on
+`chunks`/`documents`/`retrieval_results`; there is no independent citation identity worth a join
+table. `confidence` is a best-effort proxy (whichever relevance signal ordered the retrieval —
+`rerank_score` if reranking ran, else `score` — clamped to `[0.0, 1.0]`), not a calibrated
+probability; documented as such in `backend/app/core/citations.py` rather than invented.
+
+`status` (`pending`/`completed`/`failed`) mirrors `retrievals.status`'s shape, but in practice a
+`Prompt` resolves synchronously within the request — there is no Celery task for prompt building,
+since token counting and context assembly are deterministic CPU-bound computation over data the
+caller already fetched, unlike embedding generation or reranking. `failed` is reached when
+`system_prompt_tokens + conversation_tokens + query_tokens + response_reserve_tokens` alone already
+exceed `model_context_window`, leaving no room for retrieved context regardless of chunk sizes —
+a real, surfaced failure rather than a silently context-free prompt.
 
 # 21. Conversation Schema
 

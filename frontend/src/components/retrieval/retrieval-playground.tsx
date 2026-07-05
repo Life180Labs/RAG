@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 
+import { PromptPlayground } from '@/components/prompts/prompt-playground';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -56,6 +57,7 @@ export function RetrievalPlayground({
   const [error, setError] = useState<string | null>(null);
   const [activeRetrievalId, setActiveRetrievalId] = useState<string | null>(null);
   const [showInspector, setShowInspector] = useState(false);
+  const [showPromptBuilder, setShowPromptBuilder] = useState(false);
 
   const { data: history } = useRetrievals(documentId, vectorIndexId);
   const createRetrieval = useCreateRetrieval(documentId, vectorIndexId);
@@ -70,6 +72,7 @@ export function RetrievalPlayground({
   async function handleSearch() {
     setError(null);
     setShowInspector(false);
+    setShowPromptBuilder(false);
     try {
       const response = await createRetrieval.mutateAsync({
         query_text: queryText,
@@ -160,7 +163,10 @@ export function RetrievalPlayground({
         </span>
       </label>
 
-      <div className="flex flex-wrap items-center gap-3 text-xs" data-testid="advanced-retrieval-controls">
+      <div
+        className="flex flex-wrap items-center gap-3 text-xs"
+        data-testid="advanced-retrieval-controls"
+      >
         <label
           className={`flex items-center gap-2 ${queryUnderstandingEnabled ? '' : 'opacity-50'}`}
           data-testid="rag-fusion-toggle"
@@ -171,7 +177,9 @@ export function RetrievalPlayground({
             disabled={!queryUnderstandingEnabled}
             onChange={(event) => setRagFusionEnabled(event.target.checked)}
           />
-          <span className="text-muted-foreground">RAG Fusion (N-way RRF across query variants)</span>
+          <span className="text-muted-foreground">
+            RAG Fusion (N-way RRF across query variants)
+          </span>
         </label>
 
         <label className="flex items-center gap-2" data-testid="parent-child-toggle">
@@ -339,6 +347,14 @@ export function RetrievalPlayground({
               <Button size="sm" variant="ghost" onClick={() => setShowInspector((prev) => !prev)}>
                 {showInspector ? 'Hide results' : 'Inspect results'}
               </Button>
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => setShowPromptBuilder((prev) => !prev)}
+                data-testid="toggle-prompt-builder"
+              >
+                {showPromptBuilder ? 'Hide prompt builder' : 'Build prompt'}
+              </Button>
             </>
           )}
           {activeRetrieval.status === 'failed' && activeRetrieval.status_message && (
@@ -452,6 +468,14 @@ export function RetrievalPlayground({
         </p>
       )}
 
+      {showPromptBuilder && activeRetrieval?.status === 'completed' && activeRetrievalId && (
+        <PromptPlayground
+          documentId={documentId}
+          vectorIndexId={vectorIndexId}
+          retrievalId={activeRetrievalId}
+        />
+      )}
+
       {history && history.length > 0 && (
         <div className="space-y-1" data-testid="retrieval-history">
           <p className="text-muted-foreground text-xs">Recent queries</p>
@@ -467,6 +491,7 @@ export function RetrievalPlayground({
                   onClick={() => {
                     setActiveRetrievalId(retrieval.id);
                     setShowInspector(false);
+                    setShowPromptBuilder(false);
                   }}
                 >
                   {retrieval.query_text}

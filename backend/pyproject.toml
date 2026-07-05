@@ -23,6 +23,7 @@ dependencies = [
     "pgvector==0.3.6",
     "python-multipart==0.0.20",
     "pypdf==5.1.0",
+    "tiktoken==0.8.0",
 ]
 
 [project.optional-dependencies]
