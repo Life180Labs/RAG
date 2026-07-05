@@ -107,6 +107,10 @@ def _insert_retrieval(vector_index_id: str, document_id: uuid.UUID, **overrides)
         "sparse_weight": None,
         "rrf_k": None,
         "query_understanding_enabled": False,
+        "expand_to_parent": False,
+        "use_mmr": False,
+        "mmr_lambda": None,
+        "compress_context": False,
         "status": "PENDING",
         "result_count": 0,
         **overrides,
@@ -117,12 +121,14 @@ def _insert_retrieval(vector_index_id: str, document_id: uuid.UUID, **overrides)
                 "INSERT INTO retrievals "
                 "(id, vector_index_id, document_id, query_text, top_k, score_threshold, "
                 "similarity_metric, metadata_filter, retrieval_mode, fusion_method, "
-                "dense_weight, sparse_weight, rrf_k, query_understanding_enabled, status, "
+                "dense_weight, sparse_weight, rrf_k, query_understanding_enabled, "
+                "expand_to_parent, use_mmr, mmr_lambda, compress_context, status, "
                 "result_count, created_at, updated_at) "
                 "VALUES (:id, :vector_index_id, :document_id, :query_text, :top_k, "
                 ":score_threshold, :similarity_metric, CAST(:metadata_filter AS jsonb), "
                 ":retrieval_mode, :fusion_method, :dense_weight, :sparse_weight, :rrf_k, "
-                ":query_understanding_enabled, :status, :result_count, now(), now())"
+                ":query_understanding_enabled, :expand_to_parent, :use_mmr, :mmr_lambda, "
+                ":compress_context, :status, :result_count, now(), now())"
             ),
             {**fields, "metadata_filter": json.dumps(fields["metadata_filter"])
                 if fields["metadata_filter"] is not None else None},
@@ -384,3 +390,135 @@ def test_execute_retrieval_query_understanding_populates_analysis_fields(documen
         assert row.rewritten_query_text == 'What is the policy in "Section One"?'
         assert row.generated_queries == ['What is the policy in "Section One"?']
         assert row.detected_metadata_filter == {"heading": "Section One"}
+
+
+_MULTI_SECTION_BLOCKS = [
+    {"type": "heading", "text": "Chapter One", "level": 1, "page": None},
+    {
+        "type": "paragraph",
+        "text": "Chapter one covers the fundamentals of retrieval augmented generation "
+        "in significant detail, including architecture and design considerations.",
+        "level": None,
+        "page": None,
+    },
+    {"type": "heading", "text": "Chapter Two", "level": 1, "page": None},
+    {
+        "type": "paragraph",
+        "text": "Chapter two explains vector databases and approximate nearest neighbor "
+        "search algorithms used across enterprise retrieval systems.",
+        "level": None,
+        "page": None,
+    },
+]
+
+
+def test_execute_retrieval_expand_to_parent_returns_parentless_chunks(document_chain):
+    document_id = _insert_document_with_content(
+        document_chain["repository_id"], document_chain["user_id"]
+    )
+    with SessionLocal() as session:
+        session.execute(
+            text("UPDATE document_content SET structured_content = CAST(:blocks AS jsonb) "
+                 "WHERE document_id = :id"),
+            {"id": document_id, "blocks": json.dumps(_MULTI_SECTION_BLOCKS)},
+        )
+        session.commit()
+    vector_index_id = _build_pgvector_index(document_id, strategy="parent_child")
+    retrieval_id = _insert_retrieval(
+        vector_index_id,
+        document_id,
+        query_text="vector databases nearest neighbor search",
+        top_k=5,
+        expand_to_parent=True,
+    )
+
+    result = execute_retrieval.run(retrieval_id)
+    assert result["status"] == "completed"
+    assert result["result_count"] > 0
+
+    with SessionLocal() as session:
+        chunk_ids = session.execute(
+            text("SELECT chunk_id FROM retrieval_results WHERE retrieval_id = :id"),
+            {"id": retrieval_id},
+        ).all()
+        for row in chunk_ids:
+            chunk = session.execute(
+                text("SELECT parent_chunk_id FROM chunks WHERE id = :id"), {"id": row.chunk_id}
+            ).first()
+            assert chunk.parent_chunk_id is None
+
+
+def test_execute_retrieval_mmr_respects_top_k(document_chain):
+    document_id = _insert_document_with_content(
+        document_chain["repository_id"], document_chain["user_id"]
+    )
+    with SessionLocal() as session:
+        session.execute(
+            text("UPDATE document_content SET structured_content = CAST(:blocks AS jsonb) "
+                 "WHERE document_id = :id"),
+            {"id": document_id, "blocks": json.dumps(_MULTI_SECTION_BLOCKS)},
+        )
+        session.commit()
+    vector_index_id = _build_pgvector_index(document_id, strategy="sentence")
+    retrieval_id = _insert_retrieval(
+        vector_index_id,
+        document_id,
+        query_text="retrieval augmented generation vector databases",
+        top_k=2,
+        use_mmr=True,
+        mmr_lambda=0.5,
+    )
+
+    result = execute_retrieval.run(retrieval_id)
+    assert result["status"] == "completed"
+    assert 0 < result["result_count"] <= 2
+
+
+def test_execute_retrieval_compress_context_populates_compressed_text(document_chain):
+    document_id = _insert_document_with_content(
+        document_chain["repository_id"], document_chain["user_id"]
+    )
+    vector_index_id = _build_pgvector_index(document_id)
+    retrieval_id = _insert_retrieval(
+        vector_index_id, document_id, query_text="Section One", compress_context=True
+    )
+
+    result = execute_retrieval.run(retrieval_id)
+    assert result["status"] == "completed"
+
+    with SessionLocal() as session:
+        rows = session.execute(
+            text(
+                "SELECT compressed_text FROM retrieval_results WHERE retrieval_id = :id"
+            ),
+            {"id": retrieval_id},
+        ).all()
+        assert all(row.compressed_text is not None for row in rows)
+
+
+def test_execute_retrieval_rag_fusion_hybrid(document_chain):
+    document_id = _insert_document_with_hybrid_content(
+        document_chain["repository_id"], document_chain["user_id"]
+    )
+    vector_index_id = _build_pgvector_index(document_id, split_chunks=True)
+    retrieval_id = _insert_retrieval(
+        vector_index_id,
+        document_id,
+        query_text="XJ-9042 checkout error",
+        retrieval_mode="HYBRID",
+        fusion_method="RAG_FUSION",
+        rrf_k=60,
+        query_understanding_enabled=True,
+    )
+
+    result = execute_retrieval.run(retrieval_id)
+    assert result["status"] == "completed"
+    assert result["result_count"] > 0
+
+    with SessionLocal() as session:
+        row = session.execute(
+            text("SELECT fusion_method, retrieval_mode FROM retrievals WHERE id = :id"),
+            {"id": retrieval_id},
+        ).first()
+        assert row.fusion_method == "RAG_FUSION"
+        assert row.retrieval_mode == "HYBRID"

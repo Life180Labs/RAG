@@ -10,11 +10,12 @@ export type RetrievalStatus = 'pending' | 'completed' | 'failed';
 
 export type RetrievalMode = 'dense' | 'hybrid';
 
-export type FusionMethod = 'weighted_sum' | 'rrf';
+export type FusionMethod = 'weighted_sum' | 'rrf' | 'rag_fusion';
 
 export const FUSION_METHODS: { value: FusionMethod; label: string }[] = [
   { value: 'weighted_sum', label: 'Weighted sum' },
   { value: 'rrf', label: 'Reciprocal rank fusion' },
+  { value: 'rag_fusion', label: 'RAG Fusion (requires query understanding)' },
 ];
 
 export type QueryIntent =
@@ -62,6 +63,10 @@ export interface Retrieval {
   rewritten_query_text: string | null;
   generated_queries: string[] | null;
   detected_metadata_filter: Record<string, string> | null;
+  expand_to_parent: boolean;
+  use_mmr: boolean;
+  mmr_lambda: number | null;
+  compress_context: boolean;
   status: RetrievalStatus;
   status_message: string | null;
   result_count: number;
@@ -80,6 +85,7 @@ export interface RetrievalResult {
   score: number;
   dense_score: number | null;
   sparse_score: number | null;
+  compressed_text: string | null;
   chunk_text: string;
   chunk_heading: string | null;
   chunk_page: number | null;
@@ -97,4 +103,8 @@ export interface CreateRetrievalRequest {
   sparse_weight?: number;
   rrf_k?: number;
   query_understanding_enabled?: boolean;
+  expand_to_parent?: boolean;
+  use_mmr?: boolean;
+  mmr_lambda?: number;
+  compress_context?: boolean;
 }

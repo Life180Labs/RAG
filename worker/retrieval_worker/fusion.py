@@ -89,3 +89,34 @@ def reciprocal_rank_fusion(
         for chunk_id in chunk_ids
     ]
     return sorted(hits, key=lambda hit: hit.fused_score, reverse=True)
+
+
+def reciprocal_rank_fusion_multi(rank_lists: list[dict[str, float]], k: int) -> list[FusedHit]:
+    """N-way generalization of `reciprocal_rank_fusion` for RAG Fusion
+    (docs/05-task.md Phase 12; docs/02-architecture.md section 103) —
+    fuses an arbitrary number of independently-ranked candidate lists
+    (one per query variant per retriever) rather than exactly one dense
+    and one sparse list. The 2-list `reciprocal_rank_fusion` above is
+    kept as its own function rather than making this the only
+    implementation, so Phase 10's hybrid dense+sparse fusion keeps its
+    existing dense_score/sparse_score component attribution — that
+    breakdown doesn't cleanly generalize once more than two lists are
+    involved, so this function always leaves both `None`.
+    """
+    ranks_per_list = [_ranks(scores) for scores in rank_lists]
+    chunk_ids: set[str] = set()
+    for scores in rank_lists:
+        chunk_ids |= set(scores)
+
+    hits = [
+        FusedHit(
+            chunk_id=chunk_id,
+            fused_score=sum(
+                1.0 / (k + ranks[chunk_id]) for ranks in ranks_per_list if chunk_id in ranks
+            ),
+            dense_score=None,
+            sparse_score=None,
+        )
+        for chunk_id in chunk_ids
+    ]
+    return sorted(hits, key=lambda hit: hit.fused_score, reverse=True)

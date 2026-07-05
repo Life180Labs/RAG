@@ -44,6 +44,11 @@ export function RetrievalPlayground({
   const [denseWeight, setDenseWeight] = useState(0.7);
   const [rrfK, setRrfK] = useState(60);
   const [queryUnderstandingEnabled, setQueryUnderstandingEnabled] = useState(false);
+  const [ragFusionEnabled, setRagFusionEnabled] = useState(false);
+  const [expandToParent, setExpandToParent] = useState(false);
+  const [useMmr, setUseMmr] = useState(false);
+  const [mmrLambda, setMmrLambda] = useState(0.7);
+  const [compressContext, setCompressContext] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [activeRetrievalId, setActiveRetrievalId] = useState<string | null>(null);
   const [showInspector, setShowInspector] = useState(false);
@@ -68,14 +73,20 @@ export function RetrievalPlayground({
         similarity_metric: metric,
         retrieval_mode: mode,
         query_understanding_enabled: queryUnderstandingEnabled,
-        ...(mode === 'hybrid'
-          ? {
-              fusion_method: fusionMethod,
-              ...(fusionMethod === 'weighted_sum'
-                ? { dense_weight: denseWeight, sparse_weight: 1 - denseWeight }
-                : { rrf_k: rrfK }),
-            }
-          : {}),
+        expand_to_parent: expandToParent,
+        use_mmr: useMmr,
+        ...(useMmr ? { mmr_lambda: mmrLambda } : {}),
+        compress_context: compressContext,
+        ...(ragFusionEnabled
+          ? { fusion_method: 'rag_fusion' as const, rrf_k: rrfK }
+          : mode === 'hybrid'
+            ? {
+                fusion_method: fusionMethod,
+                ...(fusionMethod === 'weighted_sum'
+                  ? { dense_weight: denseWeight, sparse_weight: 1 - denseWeight }
+                  : { rrf_k: rrfK }),
+              }
+            : {}),
       });
       setActiveRetrievalId(response.data.id);
     } catch (err) {
@@ -133,12 +144,71 @@ export function RetrievalPlayground({
         <input
           type="checkbox"
           checked={queryUnderstandingEnabled}
-          onChange={(event) => setQueryUnderstandingEnabled(event.target.checked)}
+          onChange={(event) => {
+            setQueryUnderstandingEnabled(event.target.checked);
+            if (!event.target.checked) setRagFusionEnabled(false);
+          }}
         />
         <span className="text-muted-foreground">
           Query understanding (classify, rewrite, expand, extract filters)
         </span>
       </label>
+
+      <div className="flex flex-wrap items-center gap-3 text-xs" data-testid="advanced-retrieval-controls">
+        <label
+          className={`flex items-center gap-2 ${queryUnderstandingEnabled ? '' : 'opacity-50'}`}
+          data-testid="rag-fusion-toggle"
+        >
+          <input
+            type="checkbox"
+            checked={ragFusionEnabled}
+            disabled={!queryUnderstandingEnabled}
+            onChange={(event) => setRagFusionEnabled(event.target.checked)}
+          />
+          <span className="text-muted-foreground">RAG Fusion (N-way RRF across query variants)</span>
+        </label>
+
+        <label className="flex items-center gap-2" data-testid="parent-child-toggle">
+          <input
+            type="checkbox"
+            checked={expandToParent}
+            onChange={(event) => setExpandToParent(event.target.checked)}
+          />
+          <span className="text-muted-foreground">Expand to parent chunk</span>
+        </label>
+
+        <label className="flex items-center gap-2" data-testid="mmr-toggle">
+          <input
+            type="checkbox"
+            checked={useMmr}
+            onChange={(event) => setUseMmr(event.target.checked)}
+          />
+          <span className="text-muted-foreground">MMR diversify</span>
+        </label>
+        {useMmr && (
+          <label className="flex items-center gap-2">
+            <span className="text-muted-foreground">λ {mmrLambda.toFixed(2)}</span>
+            <input
+              type="range"
+              min={0}
+              max={1}
+              step={0.05}
+              value={mmrLambda}
+              onChange={(event) => setMmrLambda(Number(event.target.value))}
+              data-testid="mmr-lambda-slider"
+            />
+          </label>
+        )}
+
+        <label className="flex items-center gap-2" data-testid="compress-context-toggle">
+          <input
+            type="checkbox"
+            checked={compressContext}
+            onChange={(event) => setCompressContext(event.target.checked)}
+          />
+          <span className="text-muted-foreground">Compress context</span>
+        </label>
+      </div>
 
       <div className="flex flex-wrap items-center gap-2" data-testid="hybrid-search-dashboard">
         <div className="flex items-center gap-1 text-sm">
@@ -168,7 +238,7 @@ export function RetrievalPlayground({
               onChange={(event) => setFusionMethod(event.target.value as FusionMethod)}
               data-testid="retrieval-fusion-method-select"
             >
-              {FUSION_METHODS.map((option) => (
+              {FUSION_METHODS.filter((option) => option.value !== 'rag_fusion').map((option) => (
                 <option key={option.value} value={option.value}>
                   {option.label}
                 </option>
@@ -213,6 +283,12 @@ export function RetrievalPlayground({
         <div className="flex flex-wrap items-center gap-2 text-sm" data-testid="retrieval-summary">
           <Badge variant={statusVariant(activeRetrieval.status)}>{activeRetrieval.status}</Badge>
           <Badge variant="secondary">{activeRetrieval.retrieval_mode}</Badge>
+          {activeRetrieval.fusion_method && (
+            <Badge variant="secondary">{activeRetrieval.fusion_method}</Badge>
+          )}
+          {activeRetrieval.expand_to_parent && <Badge variant="secondary">parent-expanded</Badge>}
+          {activeRetrieval.use_mmr && <Badge variant="secondary">mmr</Badge>}
+          {activeRetrieval.compress_context && <Badge variant="secondary">compressed</Badge>}
           {activeRetrieval.status === 'completed' && (
             <>
               <span className="text-muted-foreground text-xs">
@@ -319,6 +395,12 @@ export function RetrievalPlayground({
                 )}
               </div>
               <p className="text-muted-foreground text-xs">{result.chunk_text}</p>
+              {result.compressed_text && (
+                <p className="text-xs" data-testid="retrieval-compressed-text">
+                  <span className="text-muted-foreground">Compressed: </span>
+                  {result.compressed_text}
+                </p>
+              )}
             </li>
           ))}
         </ul>

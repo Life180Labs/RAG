@@ -9,13 +9,19 @@ offsets are meaningful against the document's raw text a UI could
 display alongside it.
 """
 
-import re
-
+from common.text_utils import split_sentences
 from common.tokenizer import count_tokens
 
 _NON_PROSE_TYPES = {"image"}
 _HEADING_TYPES = {"title", "heading"}
-_SENTENCE_BOUNDARY_RE = re.compile(r"(?<=[.!?])\s+(?=[A-Z0-9\"'“])")
+
+__all__ = [
+    "context_at",
+    "join_blocks_with_spans",
+    "make_chunk",
+    "merge_units_to_chunks",
+    "split_sentences",
+]
 
 
 def join_blocks_with_spans(blocks: list[dict]) -> tuple[str, list[dict]]:
@@ -138,17 +144,3 @@ def merge_units_to_chunks(
             chunks.append(chunk)
 
     return chunks
-
-
-def split_sentences(text: str) -> list[str]:
-    """Regex-based sentence splitting — a lightweight heuristic (splits
-    on `.`/`!`/`?` followed by whitespace and a capital letter/digit/
-    quote) rather than a full NLP sentence tokenizer (nltk/spaCy). It
-    under-handles abbreviations (e.g. "Dr. Smith") but needs no model
-    download and no extra heavyweight dependency for what is, here, just
-    a chunk-boundary signal rather than downstream NLP analysis."""
-    text = text.strip()
-    if not text:
-        return []
-    sentences = _SENTENCE_BOUNDARY_RE.split(text)
-    return [s.strip() for s in sentences if s.strip()]

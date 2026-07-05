@@ -1,6 +1,7 @@
-"""Dense + hybrid retrieval execution (docs/05-task.md Phases 9-10;
+"""Dense + hybrid retrieval execution (docs/05-task.md Phases 9-12;
 docs/02-architecture.md sections 56 Dense Retrieval, 57 Sparse
-Retrieval, 58 Hybrid Search).
+Retrieval, 58 Hybrid Search, 62-63 MMR/Parent-Child, 75 Context
+Compression, 103 RAG Fusion).
 
 `execute_retrieval` runs after the backend creates a `Retrieval` row
 (status=PENDING): embeds the query text with the *same* provider/model
@@ -36,15 +37,36 @@ enabled: the query is classified, rewritten, and expanded into
 isn't configured/fails — see `query_understanding.expander`), and a
 metadata filter is auto-extracted and merged under the caller-supplied
 `metadata_filter` (caller wins on key conflicts, since an explicit
-filter should never be silently overridden by a guess).
-`query_variants` then fans out both the dense embed+search call and,
-for hybrid mode, the BM25 search — each chunk's *best* score across
-variants is kept (a max-score merge, not a second fusion pass; fusing
-across query variants is a different concern from Phase 10's
-dense/sparse fusion and deliberately kept simple). With
-`query_understanding_enabled=False`, `query_variants` is a single-item
-list containing the original query text, so the loop runs exactly
-once and produces identical results to pre-Phase-11 behavior.
+filter should never be silently overridden by a guess). Every
+retriever call below fans out across `query_variants` (a single-item
+list containing the original query text when query understanding is
+off, so the loop runs exactly once and reproduces pre-Phase-11
+behavior byte for byte).
+
+Phase 12 (advanced retrieval) inserts three more opt-in stages between
+"fuse" and "persist", plus a fourth alternate fusion strategy:
+
+- `fusion_method = "rag_fusion"` (docs/02-architecture.md section 103):
+  instead of collapsing each retriever's per-variant lists to one
+  max-score-merged list *before* fusing dense against sparse (Phase
+  10/11's approach), every per-variant per-retriever list is kept
+  separate and N-way RRF-fused at once (`fusion.reciprocal_rank_fusion_multi`).
+  Requires `query_understanding_enabled=True` (validated by the
+  backend) since fusing multiple query variants is the entire point —
+  with only one variant it degenerates to plain RRF, which the
+  cheaper `"rrf"` option already covers.
+- `expand_to_parent` (section 63): remaps each result's matched chunk
+  to its `parent_chunk_id` when one exists (`parent_expansion.expand`),
+  merging duplicates that land on the same parent by keeping the
+  highest-scoring one.
+- `use_mmr`/`mmr_lambda` (section 62): replaces plain
+  sort-and-truncate-to-top_k with a greedy Maximum Marginal Relevance
+  selection (`retrieval_worker.mmr`) over each candidate's real
+  embedding vector, trading relevance against diversity.
+- `compress_context` (section 75): after the final top_k is chosen,
+  compresses each result's chunk text down to its query-relevant
+  sentences (`retrieval_worker.compression`) and persists that
+  alongside (not instead of) the original in `RetrievalResult.compressed_text`.
 """
 
 import json
@@ -60,7 +82,7 @@ from common.embedding_providers.factory import get_provider as get_embedding_pro
 from common.logging import get_logger
 from index_worker.providers.base import UnsupportedMetricError
 from index_worker.providers.factory import get_provider as get_index_provider
-from retrieval_worker import bm25, fusion
+from retrieval_worker import bm25, compression, fusion, mmr, parent_expansion
 from retrieval_worker.query_understanding import classifier, expander, filter_extractor, rewriter
 
 logger = get_logger(__name__)
@@ -69,6 +91,7 @@ _FILTERABLE_CHUNK_COLUMNS = {"heading", "page", "language"}
 _DEFAULT_DENSE_WEIGHT = 0.7
 _DEFAULT_SPARSE_WEIGHT = 0.3
 _DEFAULT_RRF_K = 60
+_DEFAULT_MMR_LAMBDA = 0.7
 
 
 def _fail(session, retrieval_id: str, message: str) -> None:
@@ -104,6 +127,15 @@ def _fetch_chunk_texts(
     return [(str(row.id), row.text) for row in rows]
 
 
+def _merge_max(rank_lists: list[dict[str, float]]) -> dict[str, float]:
+    merged: dict[str, float] = {}
+    for scores in rank_lists:
+        for chunk_id, score in scores.items():
+            if chunk_id not in merged or score > merged[chunk_id]:
+                merged[chunk_id] = score
+    return merged
+
+
 @celery_app.task(
     name="retrieval_worker.execute_retrieval",
     autoretry_for=(Exception,),
@@ -117,6 +149,7 @@ def execute_retrieval(retrieval_id: str) -> dict:
                 "SELECT r.query_text, r.top_k, r.score_threshold, r.similarity_metric, "
                 "r.metadata_filter, r.retrieval_mode, r.fusion_method, r.dense_weight, "
                 "r.sparse_weight, r.rrf_k, r.query_understanding_enabled, "
+                "r.expand_to_parent, r.use_mmr, r.mmr_lambda, r.compress_context, "
                 "vi.document_id, vi.provider AS index_provider, "
                 "vi.namespace, ev.provider AS embed_provider, ev.model, ev.chunk_set_id "
                 "FROM retrievals r "
@@ -133,10 +166,13 @@ def execute_retrieval(retrieval_id: str) -> dict:
         metadata_filter = json.loads(row.metadata_filter) if row.metadata_filter else None
         metric = row.similarity_metric.lower()
         is_hybrid = row.retrieval_mode == "HYBRID"
-        # A larger candidate pool than top_k so fusion has real
-        # candidates to rank from both sides, not just each side's
-        # already-truncated top_k (docs/02-architecture.md section 60).
-        pool_size = max(row.top_k * 3, 20) if is_hybrid else row.top_k
+        is_rag_fusion = row.fusion_method == "RAG_FUSION"
+        # A larger candidate pool than top_k so fusion/MMR have real
+        # candidates to work from, not just an already-truncated top_k
+        # (docs/02-architecture.md section 60).
+        pool_size = (
+            max(row.top_k * 3, 20) if (is_hybrid or is_rag_fusion or row.use_mmr) else row.top_k
+        )
 
         query_intent = None
         intent_confidence = None
@@ -174,7 +210,7 @@ def execute_retrieval(retrieval_id: str) -> dict:
             _fail(session, retrieval_id, message)
             raise
 
-        dense_scores: dict[str, float] = {}
+        dense_lists: list[dict[str, float]] = []
         for variant in query_variants:
             try:
                 query_vector = embedder.embed([variant])[0].vector
@@ -203,35 +239,35 @@ def execute_retrieval(retrieval_id: str) -> dict:
                 _fail(session, retrieval_id, message)
                 raise
 
-            for hit in hits:
-                if hit.chunk_id not in dense_scores or hit.score > dense_scores[hit.chunk_id]:
-                    dense_scores[hit.chunk_id] = hit.score
+            dense_lists.append({hit.chunk_id: hit.score for hit in hits})
 
         if is_hybrid:
             chunks = _fetch_chunk_texts(session, row.chunk_set_id, metadata_filter)
-            sparse_scores: dict[str, float] = {}
-            for variant in query_variants:
-                for hit in bm25.search(chunks, variant, pool_size):
-                    if hit.chunk_id not in sparse_scores or hit.score > sparse_scores[hit.chunk_id]:
-                        sparse_scores[hit.chunk_id] = hit.score
+            sparse_lists = [
+                {hit.chunk_id: hit.score for hit in bm25.search(chunks, variant, pool_size)}
+                for variant in query_variants
+            ]
 
-            if row.fusion_method == "RRF":
+            if is_rag_fusion:
+                fused = fusion.reciprocal_rank_fusion_multi(
+                    dense_lists + sparse_lists, row.rrf_k or _DEFAULT_RRF_K
+                )
+            elif row.fusion_method == "RRF":
                 fused = fusion.reciprocal_rank_fusion(
-                    dense_scores, sparse_scores, row.rrf_k or _DEFAULT_RRF_K
+                    _merge_max(dense_lists), _merge_max(sparse_lists), row.rrf_k or _DEFAULT_RRF_K
                 )
             else:
                 fused = fusion.weighted_sum(
-                    dense_scores,
-                    sparse_scores,
+                    _merge_max(dense_lists),
+                    _merge_max(sparse_lists),
                     row.dense_weight if row.dense_weight is not None else _DEFAULT_DENSE_WEIGHT,
                     row.sparse_weight if row.sparse_weight is not None else _DEFAULT_SPARSE_WEIGHT,
                 )
 
             if row.score_threshold is not None:
                 fused = [hit for hit in fused if hit.fused_score >= row.score_threshold]
-            fused = fused[: row.top_k]
 
-            results = [
+            results_pool = [
                 {
                     "chunk_id": hit.chunk_id,
                     "score": hit.fused_score,
@@ -240,12 +276,75 @@ def execute_retrieval(retrieval_id: str) -> dict:
                 }
                 for hit in fused
             ]
+        elif is_rag_fusion:
+            fused = fusion.reciprocal_rank_fusion_multi(dense_lists, row.rrf_k or _DEFAULT_RRF_K)
+            if row.score_threshold is not None:
+                fused = [hit for hit in fused if hit.fused_score >= row.score_threshold]
+            results_pool = [
+                {"chunk_id": hit.chunk_id, "score": hit.fused_score, "dense_score": None,
+                 "sparse_score": None}
+                for hit in fused
+            ]
         else:
-            ranked = sorted(dense_scores.items(), key=lambda kv: kv[1], reverse=True)[: row.top_k]
-            results = [
+            dense_scores = _merge_max(dense_lists)
+            ranked = sorted(dense_scores.items(), key=lambda kv: kv[1], reverse=True)
+            results_pool = [
                 {"chunk_id": chunk_id, "score": score, "dense_score": None, "sparse_score": None}
                 for chunk_id, score in ranked
             ]
+
+        if row.expand_to_parent:
+            parent_rows = session.execute(
+                text("SELECT id, parent_chunk_id FROM chunks WHERE chunk_set_id = :chunk_set_id"),
+                {"chunk_set_id": row.chunk_set_id},
+            ).all()
+            parent_map = {
+                str(pr.id): (str(pr.parent_chunk_id) if pr.parent_chunk_id else None)
+                for pr in parent_rows
+            }
+            results_pool = parent_expansion.expand(results_pool, parent_map)
+            results_pool.sort(key=lambda r: r["score"], reverse=True)
+
+        if row.use_mmr and results_pool:
+            vector_rows = session.execute(
+                text(
+                    "SELECT chunk_id, embedding::text AS embedding_text FROM embeddings "
+                    "WHERE embedding_version_id = :embedding_version_id AND status = 'READY'"
+                ),
+                {"embedding_version_id": row.namespace},
+            ).all()
+            vectors = {
+                str(vr.chunk_id): mmr.parse_vector_text(vr.embedding_text) for vr in vector_rows
+            }
+            candidates = sorted(
+                (
+                    mmr.RankedCandidate(chunk_id=r["chunk_id"], score=r["score"])
+                    for r in results_pool
+                ),
+                key=lambda c: c.score,
+                reverse=True,
+            )
+            lambda_param = row.mmr_lambda if row.mmr_lambda is not None else _DEFAULT_MMR_LAMBDA
+            selected = mmr.select(candidates, vectors, row.top_k, lambda_param)
+            by_chunk_id = {r["chunk_id"]: r for r in results_pool}
+            results = [by_chunk_id[candidate.chunk_id] for candidate in selected]
+        else:
+            results = results_pool[: row.top_k]
+
+        compressed_by_chunk_id: dict[str, str] = {}
+        if row.compress_context and results:
+            chunk_text_rows = session.execute(
+                text("SELECT id, text FROM chunks WHERE chunk_set_id = :chunk_set_id"),
+                {"chunk_set_id": row.chunk_set_id},
+            ).all()
+            text_by_chunk_id = {str(ctr.id): ctr.text for ctr in chunk_text_rows}
+            for result in results:
+                chunk_text = text_by_chunk_id.get(result["chunk_id"])
+                if chunk_text:
+                    compressed_by_chunk_id[result["chunk_id"]] = compression.compress(
+                        chunk_text, row.query_text
+                    )
+
         latency_ms = int((time.perf_counter() - start) * 1000)
 
         session.execute(
@@ -255,9 +354,10 @@ def execute_retrieval(retrieval_id: str) -> dict:
             session.execute(
                 text(
                     "INSERT INTO retrieval_results "
-                    "(id, retrieval_id, chunk_id, rank, score, dense_score, sparse_score) "
+                    "(id, retrieval_id, chunk_id, rank, score, dense_score, sparse_score, "
+                    "compressed_text) "
                     "VALUES (:id, :retrieval_id, :chunk_id, :rank, :score, :dense_score, "
-                    ":sparse_score)"
+                    ":sparse_score, :compressed_text)"
                 ),
                 {
                     "id": str(uuid.uuid4()),
@@ -267,6 +367,7 @@ def execute_retrieval(retrieval_id: str) -> dict:
                     "score": result["score"],
                     "dense_score": result["dense_score"],
                     "sparse_score": result["sparse_score"],
+                    "compressed_text": compressed_by_chunk_id.get(result["chunk_id"]),
                 },
             )
 

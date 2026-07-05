@@ -68,6 +68,10 @@ class RetrievalService:
                 sparse_weight=payload.sparse_weight,
                 rrf_k=payload.rrf_k,
                 query_understanding_enabled=payload.query_understanding_enabled,
+                expand_to_parent=payload.expand_to_parent,
+                use_mmr=payload.use_mmr,
+                mmr_lambda=payload.mmr_lambda,
+                compress_context=payload.compress_context,
                 status=RetrievalStatus.PENDING,
                 created_by=actor_id,
             )

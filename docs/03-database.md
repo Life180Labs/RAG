@@ -844,6 +844,55 @@ runs four steps before search:
   caller-supplied `metadata_filter` — caller wins on key conflicts, since an explicit filter should
   never be silently overridden by a heuristic guess.
 
+**Phase 12 (advanced retrieval, docs/02-architecture.md sections 62-63, 75, 103) adds migration
+`0013_advanced_retrieval`**: `expand_to_parent`/`use_mmr`/`mmr_lambda`/`compress_context` on
+`retrievals` (each independently opt-in, defaulting off/`false`/`null`), `RAG_FUSION` added to the
+`fusion_method` enum, and `compressed_text` on `retrieval_results`. Two of this phase's task.md
+"Retrievers" deliverables — Self-Query and Multi-Query — are **not** separately implemented here;
+they're the same capability Phase 11 already delivers as `detected_metadata_filter` and
+`generated_queries` (docs/02-architecture.md sections 65 and 54 describe the identical mechanism
+Phase 11's task.md already named "Metadata Detection" and "Query Expansion") — duplicating that
+logic under this phase's name would just be dead code with no new behavior.
+
+The four real additions, applied in this order inside `retrieval_worker.execute_retrieval` after
+fusion and before persisting:
+
+- **Parent-Child retrieval** (`expand_to_parent`, section 63): search still runs against whatever
+  chunk actually matched — the chunk-level embedding is unchanged, since Phase 6's `parent_child`
+  chunking strategy already embeds both parent and child rows in the same chunk_set. This flag only
+  remaps each result's *returned* identity to `chunks.parent_chunk_id` when one exists
+  (`retrieval_worker.parent_expansion`), merging duplicates that land on the same parent by keeping
+  the highest-scoring one whole (so its `dense_score`/`sparse_score` stay attributable to the score
+  that won, rather than averaged). Chunks from any other chunking strategy have no `parent_chunk_id`
+  at all, so this is a safe no-op for them — nothing needs to check the chunk set's strategy first.
+- **MMR diversification** (`use_mmr`/`mmr_lambda`, section 62): a real greedy Maximum Marginal
+  Relevance selection (`retrieval_worker.mmr`) over each candidate's actual embedding vector — not
+  an approximation over scalar scores — fetched via `SELECT embedding::text` (the same manual
+  pgvector-text-format parsing `index_worker.tasks._parse_vector_text` already established, no
+  pgvector adapter registered on this sync engine) and compared with plain Python
+  dot-product/`math.sqrt` cosine similarity (no numpy dependency: these vectors are already
+  zero-padded to `EMBEDDING_DIM_MAX`, and trailing zero components don't change either a dot
+  product or a norm, so comparing the full padded vectors is identical to comparing just the real
+  prefix). `mmr_lambda` defaults to `0.7` (relevance-weighted, matching `dense_weight`'s Phase
+  10 default split) when `use_mmr` is set without an explicit value.
+- **RAG Fusion** (`fusion_method = "rag_fusion"`, section 103): rather than max-score-merging each
+  retriever's per-query-variant lists into one list *before* fusing dense against sparse (Phase
+  10/11's approach), every per-variant per-retriever list is kept separate and N-way RRF-fused at
+  once (`fusion.reciprocal_rank_fusion_multi`, a genuine generalization of the existing 2-list
+  `reciprocal_rank_fusion` — kept as a separate function since the dense/sparse component-score
+  breakdown that 2-list version reports doesn't cleanly generalize past two lists). Requires
+  `query_understanding_enabled=true` (backend-validated, 422 otherwise) since fusing multiple query
+  variants is the entire premise — with a single variant it degenerates to plain RRF, which the
+  cheaper `"rrf"` option already covers.
+- **Context compression** (`compress_context`, section 75): after the final top_k is chosen,
+  compresses each result's chunk text down to its query-relevant sentences
+  (`retrieval_worker.compression`) and stores that *alongside*, not instead of, the original in
+  `retrieval_results.compressed_text` — the original is always still inspectable. Scoring is lexical
+  token-overlap against a fixed English stopword list, not embedding-based — the same "real but
+  bounded" scope choice BM25 made in Phase 10: scoring every sentence via a fresh embedding call at
+  retrieval time would add real latency this phase doesn't need to pay for a working compression
+  step. Falls back to the single highest-overlap sentence rather than ever returning empty text.
+
 # 20. Prompt Schema
 
 **Pending — Prompt Builder phase.**

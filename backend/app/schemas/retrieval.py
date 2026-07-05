@@ -14,6 +14,7 @@ from app.models.retrieval import (
 _DEFAULT_DENSE_WEIGHT = 0.7
 _DEFAULT_SPARSE_WEIGHT = 0.3
 _DEFAULT_RRF_K = 60
+_DEFAULT_MMR_LAMBDA = 0.7
 
 
 class RetrievalRead(BaseModel):
@@ -38,6 +39,10 @@ class RetrievalRead(BaseModel):
     rewritten_query_text: str | None
     generated_queries: list[str] | None
     detected_metadata_filter: dict | None
+    expand_to_parent: bool
+    use_mmr: bool
+    mmr_lambda: float | None
+    compress_context: bool
     status: RetrievalStatus
     status_message: str | None
     result_count: int
@@ -58,6 +63,7 @@ class RetrievalResultRead(BaseModel):
     score: float
     dense_score: float | None
     sparse_score: float | None
+    compressed_text: str | None
     chunk_text: str
     chunk_heading: str | None
     chunk_page: int | None
@@ -75,9 +81,26 @@ class CreateRetrievalRequest(BaseModel):
     sparse_weight: float | None = Field(default=None, ge=0.0)
     rrf_k: int | None = Field(default=None, ge=1)
     query_understanding_enabled: bool = False
+    expand_to_parent: bool = False
+    use_mmr: bool = False
+    mmr_lambda: float | None = Field(default=None, ge=0.0, le=1.0)
+    compress_context: bool = False
 
     @model_validator(mode="after")
     def _apply_hybrid_defaults(self) -> "CreateRetrievalRequest":
+        if self.use_mmr and self.mmr_lambda is None:
+            self.mmr_lambda = _DEFAULT_MMR_LAMBDA
+
+        if self.fusion_method == FusionMethod.RAG_FUSION:
+            if not self.query_understanding_enabled:
+                raise ValueError(
+                    "fusion_method 'rag_fusion' requires query_understanding_enabled=true — "
+                    "RAG Fusion works by fusing multiple query variants' ranked lists, which "
+                    "requires query understanding to generate those variants."
+                )
+            self.rrf_k = self.rrf_k if self.rrf_k is not None else _DEFAULT_RRF_K
+            return self
+
         if self.retrieval_mode != RetrievalMode.HYBRID:
             return self
 

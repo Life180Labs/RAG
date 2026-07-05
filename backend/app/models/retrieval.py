@@ -39,12 +39,35 @@ Query Inspector/Rewrite Viewer/Generated Queries panels.
 different precedence when merged (caller-supplied wins on key
 conflicts) — collapsing them into one column would lose which one a
 value came from.
+
+Phase 12 (advanced retrieval, docs/02-architecture.md sections 62-63,
+75, 103) adds four more opt-in flags, each independently toggleable and
+each defaulting to off so Phase 9-11 behavior is unchanged when unset:
+`expand_to_parent` (Parent-Child retrieval — search still happens on
+whatever chunk actually matched, this only remaps the *returned*
+identity to that chunk's parent when one exists), `use_mmr`/
+`mmr_lambda` (Maximum Marginal Relevance diversification of the final
+result list), `compress_context` (per-result sentence-level
+compression, persisted on `RetrievalResult.compressed_text` rather than
+mutating `chunk_text` so the original is always still inspectable).
+`fusion_method` gains `RAG_FUSION`, which requires
+`query_understanding_enabled=True` (see `CreateRetrievalRequest`) since
+RAG Fusion's whole premise (docs/02-architecture.md section 103) is
+fusing multiple query variants' ranked lists — with only one variant
+it degenerates to plain RRF, which the existing `RRF` option already
+covers more cheaply. Self-Query and Multi-Query retrieval, also listed
+among this phase's task.md deliverables, are not reimplemented here —
+they're the same capability Phase 11's `detected_metadata_filter` and
+`generated_queries` already deliver (docs/02-architecture.md sections
+54 and 65 describe the identical mechanism Phase 11's task.md section
+51-55 already named "Query Expansion" and "Metadata Detection"), and
+duplicating that logic under a second name would just be dead code.
 """
 
 import enum
 import uuid
 
-from sqlalchemy import Boolean, Enum, Float, ForeignKey, Integer, String
+from sqlalchemy import Boolean, Enum, Float, ForeignKey, Integer, String, Text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -84,6 +107,7 @@ class RetrievalMode(str, enum.Enum):
 class FusionMethod(str, enum.Enum):
     WEIGHTED_SUM = "weighted_sum"
     RRF = "rrf"
+    RAG_FUSION = "rag_fusion"
 
 
 class Retrieval(Base, UUIDPrimaryKeyMixin, TimestampMixin):
@@ -131,6 +155,10 @@ class Retrieval(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     rewritten_query_text: Mapped[str | None] = mapped_column(String(2000), nullable=True)
     generated_queries: Mapped[list[str] | None] = mapped_column(JSONB, nullable=True)
     detected_metadata_filter: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    expand_to_parent: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    use_mmr: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    mmr_lambda: Mapped[float | None] = mapped_column(Float, nullable=True)
+    compress_context: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     status: Mapped[RetrievalStatus] = mapped_column(
         Enum(RetrievalStatus, name="retrieval_status"),
         nullable=False,
@@ -166,3 +194,4 @@ class RetrievalResult(Base, UUIDPrimaryKeyMixin):
     score: Mapped[float] = mapped_column(Float, nullable=False)
     dense_score: Mapped[float | None] = mapped_column(Float, nullable=True)
     sparse_score: Mapped[float | None] = mapped_column(Float, nullable=True)
+    compressed_text: Mapped[str | None] = mapped_column(Text, nullable=True)

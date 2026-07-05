@@ -365,7 +365,7 @@ VIEWER+.
 
 | Method | Path | Auth | Notes |
 |--------|------|----------|---------|
-| POST   | `/api/v1/documents/{document_id}/vector-indexes/{vector_index_id}/retrievals` | Document VIEWER | Run a retrieval query; body `{"query_text": "...", "top_k": 10, "score_threshold": null, "similarity_metric": "cosine", "metadata_filter": null, "retrieval_mode": "dense", "fusion_method": null, "dense_weight": null, "sparse_weight": null, "rrf_k": null, "query_understanding_enabled": false}` (only `query_text` required) |
+| POST   | `/api/v1/documents/{document_id}/vector-indexes/{vector_index_id}/retrievals` | Document VIEWER | Run a retrieval query; body `{"query_text": "...", "top_k": 10, "score_threshold": null, "similarity_metric": "cosine", "metadata_filter": null, "retrieval_mode": "dense", "fusion_method": null, "dense_weight": null, "sparse_weight": null, "rrf_k": null, "query_understanding_enabled": false, "expand_to_parent": false, "use_mmr": false, "mmr_lambda": null, "compress_context": false}` (only `query_text` required) |
 | GET    | `/api/v1/documents/{document_id}/vector-indexes/{vector_index_id}/retrievals` | Document VIEWER | List past retrievals against this index, most recent first; `?limit=50&offset=0` |
 | GET    | `/api/v1/documents/{document_id}/vector-indexes/{vector_index_id}/retrievals/{retrieval_id}` | Document VIEWER | Get one retrieval's status and aggregate stats |
 | GET    | `/api/v1/documents/{document_id}/vector-indexes/{vector_index_id}/retrievals/{retrieval_id}/results` | Document VIEWER | Get the ranked candidate list (chunk text, heading, page, rank, score) |
@@ -413,6 +413,25 @@ extraction — see docs/03-database.md section 19 for the full pipeline descript
 `status: "completed"` (they're computed by the worker, same as every other analysis field on this
 resource). `detected_metadata_filter` is merged under any caller-supplied `metadata_filter` before
 search — the caller's explicit filter always wins on a key conflict.
+
+**Advanced retrieval (Phase 12)**: four independent opt-in flags, each defaulting off so
+Phase 9-11 behavior is unchanged when unset — see docs/03-database.md section 19 for the full
+pipeline description of each.
+
+- `expand_to_parent` (default `false`): remaps each result to its parent chunk when one exists
+  (Phase 6 `parent_child` chunk sets only; a no-op otherwise). Results that share a parent are
+  merged, keeping the highest-scoring one.
+- `use_mmr`/`mmr_lambda` (default `false`/`null`): diversifies the final result list via real
+  Maximum Marginal Relevance over each candidate's embedding vector. `mmr_lambda` (0-1, higher
+  favors relevance over diversity) defaults to `0.7` when `use_mmr` is `true` and omitted.
+- `fusion_method` gains `rag_fusion`: N-way reciprocal rank fusion across every query variant's
+  ranked list (docs/02-architecture.md section 103), instead of the max-score merge Phase 11 uses
+  before Phase 10's 2-list dense/sparse fusion. **Requires `query_understanding_enabled: true`**
+  (`422` otherwise) — fusing multiple query variants is RAG Fusion's entire premise. `rrf_k`
+  applies the same way it does for plain `rrf`.
+- `compress_context` (default `false`): compresses each result's chunk text to its query-relevant
+  sentences. The results response gains `compressed_text` (`null` unless `compress_context` was
+  set) — populated *alongside* the unabridged `chunk_text`, never replacing it.
 
 # 16. Reranking APIs
 
