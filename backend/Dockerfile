@@ -17,7 +17,7 @@ RUN pip install --no-cache-dir --upgrade pip \
 # actually survive into the final image (a plain default-location "pre-cache"
 # RUN would silently do nothing across this multi-stage build).
 ENV TIKTOKEN_CACHE_DIR=/opt/tiktoken_cache
-RUN python -c "import tiktoken; tiktoken.get_encoding('cl100k_base')"
+RUN PYTHONPATH=/install/lib/python3.11/site-packages python -c "import tiktoken; tiktoken.get_encoding('cl100k_base')"
 
 # --- Runtime stage ---
 FROM python:3.11-slim AS runtime

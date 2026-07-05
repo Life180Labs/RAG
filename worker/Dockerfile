@@ -9,6 +9,7 @@ COPY common ./common
 COPY document_worker ./document_worker
 COPY chunk_worker ./chunk_worker
 COPY embedding_worker ./embedding_worker
+COPY index_worker ./index_worker
 COPY retrieval_worker ./retrieval_worker
 COPY evaluation_worker ./evaluation_worker
 COPY benchmark_worker ./benchmark_worker
@@ -34,6 +35,7 @@ COPY --from=builder /build/common ./common
 COPY --from=builder /build/document_worker ./document_worker
 COPY --from=builder /build/chunk_worker ./chunk_worker
 COPY --from=builder /build/embedding_worker ./embedding_worker
+COPY --from=builder /build/index_worker ./index_worker
 COPY --from=builder /build/retrieval_worker ./retrieval_worker
 COPY --from=builder /build/evaluation_worker ./evaluation_worker
 COPY --from=builder /build/benchmark_worker ./benchmark_worker
