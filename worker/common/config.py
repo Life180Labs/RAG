@@ -50,6 +50,12 @@ class WorkerSettings(BaseSettings):
     chroma_url: str = "http://localhost:8001"
     pinecone_api_key: str | None = None
 
+    # Retrieval Cache (Phase 17, docs/02-architecture.md section 100) — TTL
+    # is independently configurable here (backend has its own equivalent
+    # settings for the caches it owns); backend and worker never import
+    # each other's config module.
+    retrieval_cache_ttl_seconds: int = 3600
+
 
 @lru_cache
 def get_worker_settings() -> WorkerSettings:

@@ -89,6 +89,7 @@ from datetime import UTC, datetime
 
 from sqlalchemy import text
 
+from common import cache
 from common.celery_app import celery_app
 from common.db import SessionLocal
 from common.embedding_providers.factory import get_provider as get_embedding_provider
@@ -150,6 +151,269 @@ def _merge_max(rank_lists: list[dict[str, float]]) -> dict[str, float]:
     return merged
 
 
+@celery_app.task(name="retrieval_worker.embed_query_text")
+def embed_query_text(vector_index_id: str, query_text: str) -> dict:
+    """Embed a single ad-hoc text with the *same* provider/model that
+    produced the target vector index's embedding version — the same
+    lookup `execute_retrieval` does for the dense-search query embedding
+    above, factored out here so the backend (Phase 17's Semantic Cache,
+    `app/core/cache/semantic.py`) can get a real query embedding via a
+    synchronous Celery round trip without duplicating ML dependencies
+    into the backend package. Deliberately does *not* touch `retrievals`
+    or run any search — this is a pure embed-and-return utility task.
+    """
+    with SessionLocal() as session:
+        row = session.execute(
+            text(
+                "SELECT ev.provider AS embed_provider, ev.model "
+                "FROM vector_indexes vi "
+                "JOIN embedding_versions ev ON ev.id = vi.embedding_version_id "
+                "WHERE vi.id = :id"
+            ),
+            {"id": vector_index_id},
+        ).first()
+        if row is None:
+            return {"status": "error", "message": "vector_index_not_found"}
+
+        try:
+            embedder = get_embedding_provider(row.embed_provider, row.model)
+            vector = embedder.embed([query_text])[0].vector
+        except Exception as exc:  # noqa: BLE001 - caller treats any failure as a cache-miss signal
+            return {"status": "error", "message": f"Query embedding failed: {exc}"[:500]}
+
+        return {
+            "status": "ok",
+            "vector": list(vector),
+            "provider": row.embed_provider,
+            "model": row.model,
+        }
+
+
+def _compute_retrieval(
+    session, retrieval_id, row, metadata_filter, metric, is_hybrid, is_rag_fusion, pool_size
+):
+    """Runs the full retrieval pipeline (query understanding -> embed ->
+    search -> fuse -> parent-expand -> rerank -> mmr -> compress) exactly
+    as `execute_retrieval` always has — extracted into its own function
+    only so a Retrieval Cache hit (docs/02-architecture.md section 100)
+    can skip straight past all of it. Returns `("failed", {"reason":
+    ...})` for the one expected failure that must short-circuit the
+    whole task (`UnsupportedMetricError`, already marked failed on the
+    `retrievals` row by `_fail`), or `("ok", {...fields
+    execute_retrieval persists, all JSON-serializable so the caller can
+    hand this dict straight to the cache...})` on success. Any other
+    exception propagates up unchanged, same as before extraction.
+    """
+    query_intent = None
+    intent_confidence = None
+    rewritten_query_text = None
+    generated_queries = None
+    detected_metadata_filter = None
+    query_variants = [row.query_text]
+
+    if row.query_understanding_enabled:
+        intent, confidence = classifier.classify(row.query_text)
+        query_intent = intent.name
+        intent_confidence = confidence
+        rewritten_query_text = rewriter.rewrite(row.query_text)
+        generated_queries = expander.expand(rewritten_query_text)
+        query_variants = generated_queries
+        detected_metadata_filter = filter_extractor.extract(row.query_text) or None
+        if detected_metadata_filter:
+            # Caller-supplied filter wins on key conflicts — an
+            # explicit filter should never be silently overridden
+            # by a heuristic guess.
+            metadata_filter = {**detected_metadata_filter, **(metadata_filter or {})}
+
+    try:
+        embedder = get_embedding_provider(row.embed_provider, row.model)
+    except Exception as exc:
+        message = f"Query embedding failed: {exc}"[:500]
+        _fail(session, retrieval_id, message)
+        raise
+
+    try:
+        index_provider = get_index_provider(row.index_provider, session)
+    except Exception as exc:
+        message = f"Search failed: {exc}"[:500]
+        _fail(session, retrieval_id, message)
+        raise
+
+    dense_lists: list[dict[str, float]] = []
+    for variant in query_variants:
+        try:
+            query_vector = embedder.embed([variant])[0].vector
+        except Exception as exc:
+            message = f"Query embedding failed: {exc}"[:500]
+            _fail(session, retrieval_id, message)
+            raise
+
+        try:
+            hits = index_provider.search(
+                row.namespace, query_vector, pool_size, metric,
+                None if is_hybrid else row.score_threshold,
+                metadata_filter,
+            )
+        except UnsupportedMetricError as exc:
+            message = str(exc)
+            _fail(session, retrieval_id, message)
+            logger.warning(
+                "execute_retrieval_unsupported_metric",
+                retrieval_id=retrieval_id,
+                error=message,
+            )
+            return "failed", {"reason": message}
+        except Exception as exc:
+            message = f"Search failed: {exc}"[:500]
+            _fail(session, retrieval_id, message)
+            raise
+
+        dense_lists.append({hit.chunk_id: hit.score for hit in hits})
+
+    if is_hybrid:
+        chunks = _fetch_chunk_texts(session, row.chunk_set_id, metadata_filter)
+        sparse_lists = [
+            {hit.chunk_id: hit.score for hit in bm25.search(chunks, variant, pool_size)}
+            for variant in query_variants
+        ]
+
+        if is_rag_fusion:
+            fused = fusion.reciprocal_rank_fusion_multi(
+                dense_lists + sparse_lists, row.rrf_k or _DEFAULT_RRF_K
+            )
+        elif row.fusion_method == "RRF":
+            fused = fusion.reciprocal_rank_fusion(
+                _merge_max(dense_lists), _merge_max(sparse_lists), row.rrf_k or _DEFAULT_RRF_K
+            )
+        else:
+            fused = fusion.weighted_sum(
+                _merge_max(dense_lists),
+                _merge_max(sparse_lists),
+                row.dense_weight if row.dense_weight is not None else _DEFAULT_DENSE_WEIGHT,
+                row.sparse_weight if row.sparse_weight is not None else _DEFAULT_SPARSE_WEIGHT,
+            )
+
+        if row.score_threshold is not None:
+            fused = [hit for hit in fused if hit.fused_score >= row.score_threshold]
+
+        results_pool = [
+            {
+                "chunk_id": hit.chunk_id,
+                "score": hit.fused_score,
+                "dense_score": hit.dense_score,
+                "sparse_score": hit.sparse_score,
+            }
+            for hit in fused
+        ]
+    elif is_rag_fusion:
+        fused = fusion.reciprocal_rank_fusion_multi(dense_lists, row.rrf_k or _DEFAULT_RRF_K)
+        if row.score_threshold is not None:
+            fused = [hit for hit in fused if hit.fused_score >= row.score_threshold]
+        results_pool = [
+            {"chunk_id": hit.chunk_id, "score": hit.fused_score, "dense_score": None,
+             "sparse_score": None}
+            for hit in fused
+        ]
+    else:
+        dense_scores = _merge_max(dense_lists)
+        ranked = sorted(dense_scores.items(), key=lambda kv: kv[1], reverse=True)
+        results_pool = [
+            {"chunk_id": chunk_id, "score": score, "dense_score": None, "sparse_score": None}
+            for chunk_id, score in ranked
+        ]
+
+    if row.expand_to_parent:
+        parent_rows = session.execute(
+            text("SELECT id, parent_chunk_id FROM chunks WHERE chunk_set_id = :chunk_set_id"),
+            {"chunk_set_id": row.chunk_set_id},
+        ).all()
+        parent_map = {
+            str(pr.id): (str(pr.parent_chunk_id) if pr.parent_chunk_id else None)
+            for pr in parent_rows
+        }
+        results_pool = parent_expansion.expand(results_pool, parent_map)
+        results_pool.sort(key=lambda r: r["score"], reverse=True)
+
+    chunk_text_by_id: dict[str, str] = {}
+    if row.rerank_enabled or row.compress_context:
+        chunk_text_rows = session.execute(
+            text("SELECT id, text FROM chunks WHERE chunk_set_id = :chunk_set_id"),
+            {"chunk_set_id": row.chunk_set_id},
+        ).all()
+        chunk_text_by_id = {str(ctr.id): ctr.text for ctr in chunk_text_rows}
+
+    for result in results_pool:
+        result["rerank_score"] = None
+
+    if row.rerank_enabled and results_pool:
+        candidates = [
+            (r["chunk_id"], chunk_text_by_id[r["chunk_id"]])
+            for r in results_pool
+            if r["chunk_id"] in chunk_text_by_id
+        ]
+        try:
+            reranker = reranking_factory.get_provider(row.reranker_provider.lower())
+            rerank_hits = reranker.rerank(row.query_text, candidates)
+        except Exception as exc:
+            message = f"Reranking failed: {exc}"[:500]
+            _fail(session, retrieval_id, message)
+            raise
+        rerank_score_by_id = {hit.chunk_id: hit.score for hit in rerank_hits}
+        for r in results_pool:
+            r["rerank_score"] = rerank_score_by_id.get(r["chunk_id"])
+        results_pool.sort(
+            key=lambda r: r["rerank_score"] if r["rerank_score"] is not None else float("-inf"),
+            reverse=True,
+        )
+
+    relevance_key = "rerank_score" if row.rerank_enabled else "score"
+
+    if row.use_mmr and results_pool:
+        vector_rows = session.execute(
+            text(
+                "SELECT chunk_id, embedding::text AS embedding_text FROM embeddings "
+                "WHERE embedding_version_id = :embedding_version_id AND status = 'READY'"
+            ),
+            {"embedding_version_id": row.namespace},
+        ).all()
+        vectors = {
+            str(vr.chunk_id): mmr.parse_vector_text(vr.embedding_text) for vr in vector_rows
+        }
+        candidates = sorted(
+            (
+                mmr.RankedCandidate(chunk_id=r["chunk_id"], score=r[relevance_key])
+                for r in results_pool
+            ),
+            key=lambda c: c.score,
+            reverse=True,
+        )
+        lambda_param = row.mmr_lambda if row.mmr_lambda is not None else _DEFAULT_MMR_LAMBDA
+        selected = mmr.select(candidates, vectors, row.top_k, lambda_param)
+        by_chunk_id = {r["chunk_id"]: r for r in results_pool}
+        results = [by_chunk_id[candidate.chunk_id] for candidate in selected]
+    else:
+        results = results_pool[: row.top_k]
+
+    compressed_by_chunk_id: dict[str, str] = {}
+    if row.compress_context and results:
+        for result in results:
+            chunk_text = chunk_text_by_id.get(result["chunk_id"])
+            if chunk_text:
+                compressed_by_chunk_id[result["chunk_id"]] = compression.compress(
+                    chunk_text, row.query_text
+                )
+
+    return "ok", {
+        "query_intent": query_intent,
+        "intent_confidence": intent_confidence,
+        "rewritten_query_text": rewritten_query_text,
+        "generated_queries": generated_queries,
+        "detected_metadata_filter": detected_metadata_filter,
+        "results": results,
+        "compressed_by_chunk_id": compressed_by_chunk_id,
+    }
+
+
 @celery_app.task(
     name="retrieval_worker.execute_retrieval",
     autoretry_for=(Exception,),
@@ -165,8 +429,9 @@ def execute_retrieval(retrieval_id: str) -> dict:
                 "r.sparse_weight, r.rrf_k, r.query_understanding_enabled, "
                 "r.expand_to_parent, r.use_mmr, r.mmr_lambda, r.compress_context, "
                 "r.rerank_enabled, r.reranker_provider, "
-                "vi.document_id, vi.provider AS index_provider, "
-                "vi.namespace, ev.provider AS embed_provider, ev.model, ev.chunk_set_id "
+                "vi.document_id, vi.provider AS index_provider, vi.version AS index_version, "
+                "vi.namespace, ev.provider AS embed_provider, ev.model, ev.chunk_set_id, "
+                "ev.version AS embed_version "
                 "FROM retrievals r "
                 "JOIN vector_indexes vi ON vi.id = r.vector_index_id "
                 "JOIN embedding_versions ev ON ev.id = vi.embedding_version_id "
@@ -195,205 +460,59 @@ def execute_retrieval(retrieval_id: str) -> dict:
             # meaningfully reorder.
             pool_size = max(pool_size, row.top_k * 5, 50)
 
-        query_intent = None
-        intent_confidence = None
-        rewritten_query_text = None
-        generated_queries = None
-        detected_metadata_filter = None
-        query_variants = [row.query_text]
-
-        if row.query_understanding_enabled:
-            intent, confidence = classifier.classify(row.query_text)
-            query_intent = intent.name
-            intent_confidence = confidence
-            rewritten_query_text = rewriter.rewrite(row.query_text)
-            generated_queries = expander.expand(rewritten_query_text)
-            query_variants = generated_queries
-            detected_metadata_filter = filter_extractor.extract(row.query_text) or None
-            if detected_metadata_filter:
-                # Caller-supplied filter wins on key conflicts — an
-                # explicit filter should never be silently overridden
-                # by a heuristic guess.
-                metadata_filter = {**detected_metadata_filter, **(metadata_filter or {})}
+        # Retrieval Cache (docs/02-architecture.md section 100, Phase 17):
+        # key includes embed_version/index_version so a real re-embed or
+        # index rebuild naturally invalidates every old entry for this
+        # index — see common/cache.py's module docstring.
+        cache_key = cache.build_key(
+            embed_version=row.embed_version,
+            index_version=row.index_version,
+            namespace=row.namespace,
+            query_text=row.query_text,
+            top_k=row.top_k,
+            score_threshold=row.score_threshold,
+            similarity_metric=metric,
+            metadata_filter=metadata_filter,
+            retrieval_mode=row.retrieval_mode,
+            fusion_method=row.fusion_method,
+            dense_weight=row.dense_weight,
+            sparse_weight=row.sparse_weight,
+            rrf_k=row.rrf_k,
+            query_understanding_enabled=row.query_understanding_enabled,
+            expand_to_parent=row.expand_to_parent,
+            use_mmr=row.use_mmr,
+            mmr_lambda=row.mmr_lambda,
+            compress_context=row.compress_context,
+            rerank_enabled=row.rerank_enabled,
+            reranker_provider=row.reranker_provider,
+        )
 
         start = time.perf_counter()
-        try:
-            embedder = get_embedding_provider(row.embed_provider, row.model)
-        except Exception as exc:
-            message = f"Query embedding failed: {exc}"[:500]
-            _fail(session, retrieval_id, message)
-            raise
-
-        try:
-            index_provider = get_index_provider(row.index_provider, session)
-        except Exception as exc:
-            message = f"Search failed: {exc}"[:500]
-            _fail(session, retrieval_id, message)
-            raise
-
-        dense_lists: list[dict[str, float]] = []
-        for variant in query_variants:
-            try:
-                query_vector = embedder.embed([variant])[0].vector
-            except Exception as exc:
-                message = f"Query embedding failed: {exc}"[:500]
-                _fail(session, retrieval_id, message)
-                raise
-
-            try:
-                hits = index_provider.search(
-                    row.namespace, query_vector, pool_size, metric,
-                    None if is_hybrid else row.score_threshold,
-                    metadata_filter,
-                )
-            except UnsupportedMetricError as exc:
-                message = str(exc)
-                _fail(session, retrieval_id, message)
-                logger.warning(
-                    "execute_retrieval_unsupported_metric",
-                    retrieval_id=retrieval_id,
-                    error=message,
-                )
-                return {"status": "failed", "reason": message}
-            except Exception as exc:
-                message = f"Search failed: {exc}"[:500]
-                _fail(session, retrieval_id, message)
-                raise
-
-            dense_lists.append({hit.chunk_id: hit.score for hit in hits})
-
-        if is_hybrid:
-            chunks = _fetch_chunk_texts(session, row.chunk_set_id, metadata_filter)
-            sparse_lists = [
-                {hit.chunk_id: hit.score for hit in bm25.search(chunks, variant, pool_size)}
-                for variant in query_variants
-            ]
-
-            if is_rag_fusion:
-                fused = fusion.reciprocal_rank_fusion_multi(
-                    dense_lists + sparse_lists, row.rrf_k or _DEFAULT_RRF_K
-                )
-            elif row.fusion_method == "RRF":
-                fused = fusion.reciprocal_rank_fusion(
-                    _merge_max(dense_lists), _merge_max(sparse_lists), row.rrf_k or _DEFAULT_RRF_K
-                )
-            else:
-                fused = fusion.weighted_sum(
-                    _merge_max(dense_lists),
-                    _merge_max(sparse_lists),
-                    row.dense_weight if row.dense_weight is not None else _DEFAULT_DENSE_WEIGHT,
-                    row.sparse_weight if row.sparse_weight is not None else _DEFAULT_SPARSE_WEIGHT,
-                )
-
-            if row.score_threshold is not None:
-                fused = [hit for hit in fused if hit.fused_score >= row.score_threshold]
-
-            results_pool = [
-                {
-                    "chunk_id": hit.chunk_id,
-                    "score": hit.fused_score,
-                    "dense_score": hit.dense_score,
-                    "sparse_score": hit.sparse_score,
-                }
-                for hit in fused
-            ]
-        elif is_rag_fusion:
-            fused = fusion.reciprocal_rank_fusion_multi(dense_lists, row.rrf_k or _DEFAULT_RRF_K)
-            if row.score_threshold is not None:
-                fused = [hit for hit in fused if hit.fused_score >= row.score_threshold]
-            results_pool = [
-                {"chunk_id": hit.chunk_id, "score": hit.fused_score, "dense_score": None,
-                 "sparse_score": None}
-                for hit in fused
-            ]
+        cached = cache.get_cached(cache_key)
+        if cached is not None:
+            query_intent = cached["query_intent"]
+            intent_confidence = cached["intent_confidence"]
+            rewritten_query_text = cached["rewritten_query_text"]
+            generated_queries = cached["generated_queries"]
+            detected_metadata_filter = cached["detected_metadata_filter"]
+            results = cached["results"]
+            compressed_by_chunk_id = cached["compressed_by_chunk_id"]
         else:
-            dense_scores = _merge_max(dense_lists)
-            ranked = sorted(dense_scores.items(), key=lambda kv: kv[1], reverse=True)
-            results_pool = [
-                {"chunk_id": chunk_id, "score": score, "dense_score": None, "sparse_score": None}
-                for chunk_id, score in ranked
-            ]
-
-        if row.expand_to_parent:
-            parent_rows = session.execute(
-                text("SELECT id, parent_chunk_id FROM chunks WHERE chunk_set_id = :chunk_set_id"),
-                {"chunk_set_id": row.chunk_set_id},
-            ).all()
-            parent_map = {
-                str(pr.id): (str(pr.parent_chunk_id) if pr.parent_chunk_id else None)
-                for pr in parent_rows
-            }
-            results_pool = parent_expansion.expand(results_pool, parent_map)
-            results_pool.sort(key=lambda r: r["score"], reverse=True)
-
-        chunk_text_by_id: dict[str, str] = {}
-        if row.rerank_enabled or row.compress_context:
-            chunk_text_rows = session.execute(
-                text("SELECT id, text FROM chunks WHERE chunk_set_id = :chunk_set_id"),
-                {"chunk_set_id": row.chunk_set_id},
-            ).all()
-            chunk_text_by_id = {str(ctr.id): ctr.text for ctr in chunk_text_rows}
-
-        for result in results_pool:
-            result["rerank_score"] = None
-
-        if row.rerank_enabled and results_pool:
-            candidates = [
-                (r["chunk_id"], chunk_text_by_id[r["chunk_id"]])
-                for r in results_pool
-                if r["chunk_id"] in chunk_text_by_id
-            ]
-            try:
-                reranker = reranking_factory.get_provider(row.reranker_provider.lower())
-                rerank_hits = reranker.rerank(row.query_text, candidates)
-            except Exception as exc:
-                message = f"Reranking failed: {exc}"[:500]
-                _fail(session, retrieval_id, message)
-                raise
-            rerank_score_by_id = {hit.chunk_id: hit.score for hit in rerank_hits}
-            for r in results_pool:
-                r["rerank_score"] = rerank_score_by_id.get(r["chunk_id"])
-            results_pool.sort(
-                key=lambda r: r["rerank_score"] if r["rerank_score"] is not None else float("-inf"),
-                reverse=True,
+            outcome, payload = _compute_retrieval(
+                session, retrieval_id, row, metadata_filter, metric,
+                is_hybrid, is_rag_fusion, pool_size,
             )
+            if outcome == "failed":
+                return {"status": "failed", "reason": payload["reason"]}
 
-        relevance_key = "rerank_score" if row.rerank_enabled else "score"
-
-        if row.use_mmr and results_pool:
-            vector_rows = session.execute(
-                text(
-                    "SELECT chunk_id, embedding::text AS embedding_text FROM embeddings "
-                    "WHERE embedding_version_id = :embedding_version_id AND status = 'READY'"
-                ),
-                {"embedding_version_id": row.namespace},
-            ).all()
-            vectors = {
-                str(vr.chunk_id): mmr.parse_vector_text(vr.embedding_text) for vr in vector_rows
-            }
-            candidates = sorted(
-                (
-                    mmr.RankedCandidate(chunk_id=r["chunk_id"], score=r[relevance_key])
-                    for r in results_pool
-                ),
-                key=lambda c: c.score,
-                reverse=True,
-            )
-            lambda_param = row.mmr_lambda if row.mmr_lambda is not None else _DEFAULT_MMR_LAMBDA
-            selected = mmr.select(candidates, vectors, row.top_k, lambda_param)
-            by_chunk_id = {r["chunk_id"]: r for r in results_pool}
-            results = [by_chunk_id[candidate.chunk_id] for candidate in selected]
-        else:
-            results = results_pool[: row.top_k]
-
-        compressed_by_chunk_id: dict[str, str] = {}
-        if row.compress_context and results:
-            for result in results:
-                chunk_text = chunk_text_by_id.get(result["chunk_id"])
-                if chunk_text:
-                    compressed_by_chunk_id[result["chunk_id"]] = compression.compress(
-                        chunk_text, row.query_text
-                    )
+            query_intent = payload["query_intent"]
+            intent_confidence = payload["intent_confidence"]
+            rewritten_query_text = payload["rewritten_query_text"]
+            generated_queries = payload["generated_queries"]
+            detected_metadata_filter = payload["detected_metadata_filter"]
+            results = payload["results"]
+            compressed_by_chunk_id = payload["compressed_by_chunk_id"]
+            cache.set_cached(cache_key, payload)
 
         latency_ms = int((time.perf_counter() - start) * 1000)
 

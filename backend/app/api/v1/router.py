@@ -6,6 +6,7 @@ from fastapi import APIRouter
 
 from app.api.v1 import (
     auth,
+    cache,
     chunks,
     conversations,
     documents,
@@ -40,3 +41,4 @@ api_router.include_router(prompts.router)
 api_router.include_router(llm.router)
 api_router.include_router(conversations.router)
 api_router.include_router(invitations.router)
+api_router.include_router(cache.router)

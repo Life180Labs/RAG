@@ -164,6 +164,18 @@ def build_index(
         )
         next_version = (old_index_row.version + 1) if old_index_row is not None else 1
 
+        if old_index_row is not None:
+            # Rebuild of an existing index (same id, version bumping) —
+            # any Semantic Cache entries (Phase 17, backend-owned table)
+            # keyed to this vector_index_id were answered against the
+            # *old* vectors and must not survive a rebuild, regardless of
+            # whether this rebuild itself succeeds or fails below.
+            session.execute(
+                text("DELETE FROM semantic_cache_entries WHERE vector_index_id = :id"),
+                {"id": vector_index_id},
+            )
+            session.commit()
+
         def _fail(message: str) -> None:
             _upsert_vector_index(
                 session,

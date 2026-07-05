@@ -574,6 +574,22 @@ query over existing audit/conversation data rather than a stale counter, and is 
 through a dedicated endpoint; "Saved Searches" has no resource at all yet, since nothing in this
 API represents a savable "search" independent of a retrieval/conversation.
 
+# Cache APIs (no dedicated section number in the original TOC)
+
+Phase 17 (Intelligent Caching, docs/02-architecture.md section 148). One endpoint, authenticated but
+not tenant-scoped — like `/llm/models`, this describes the caching *system* itself, not any one
+repository's data:
+
+- `GET /cache/stats` — hit/miss counts and computed hit ratio per cache type (`retrieval`,
+  `prompt`, `semantic`, `metadata`), read from Redis counters (`app/core/cache/metrics.py`).
+
+There is no create/delete/invalidate endpoint for any individual cache entry — invalidation is
+handled internally, not exposed as an API surface: the Retrieval Cache's key already embeds the
+embedding-version/index-version numbers Phase 7/8 bump on every regeneration (so a real re-embed or
+rebuild naturally produces a new key), the Prompt Cache and Metadata Cache both TTL-expire, and the
+Semantic Cache is explicitly purged by `index_worker.build_index` whenever its vector index is
+rebuilt (see `docs/03-database.md`'s Semantic Cache Schema section for all three mechanisms).
+
 # 21. Evaluation APIs
 
 **Pending — Evaluation Engine phase.**

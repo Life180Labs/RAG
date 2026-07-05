@@ -1058,6 +1058,32 @@ docs/02-architecture.md section 95 lists under long-term memory have **no column
 maintaining a counter that could drift stale — and "Saved Searches" isn't implemented, since no
 resource in this API yet represents a savable "search" independent of a retrieval/conversation.
 
+# Semantic Cache Schema (no dedicated section number in the original TOC)
+
+Phase 17 (Intelligent Caching, docs/02-architecture.md section 99) adds migration
+`0018_add_semantic_cache_entries` — one table, `semantic_cache_entries` — the same situation
+LLM Request Schema above already documents: no numbered section was reserved for it, so this is
+that convention applied again. The Retrieval Cache and Prompt Cache (sections 100-101) have no
+tables of their own — both are pure Redis key-value entries (TTL-expiring, never queried
+relationally), so there's nothing to document here beyond their cache-key shape, already covered
+in `backend/app/core/cache/keys.py` and `worker/common/cache.py`.
+
+`SemanticCacheEntry` is scoped to `vector_index_id` (`ON DELETE CASCADE` — same granularity as
+`Conversation`/`Retrieval`) plus a denormalized `repository_id`, the same RBAC-shortcut rationale
+`retrievals.repository_id` already uses. `query_embedding` reuses `embeddings.embedding`'s exact
+zero-padding convention (`Vector(EMBEDDING_DIM_MAX)`, `app/models/embedding.py`) so the same
+pgvector column type and cosine-distance operator work unchanged — a lookup is always additionally
+scoped to `vector_index_id`, since raw vector similarity alone can't distinguish "same question,
+same index" from "same question, unrelated index."
+
+Unlike `retrieval_results`/`retrievals`, there is no explicit version-bump-based invalidation key
+here — instead, `index_worker.build_index` (worker/index_worker/tasks.py) deletes every
+`semantic_cache_entries` row for a `vector_index_id` whenever that index is rebuilt (same id,
+`vector_indexes.version` bumped), since a rebuild's underlying vectors have changed and every
+previously cached answer for that index is potentially stale. `hit_count` is a running counter
+bumped in place on each cache hit (`ConversationService.send_message`), not recomputed — cheap to
+chart directly, the same convention `retrievals.avg_similarity` already established.
+
 # 23. Evaluation Schema
 
 **Pending — Evaluation Engine phase.**

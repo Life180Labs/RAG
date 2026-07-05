@@ -10,6 +10,13 @@ Prompts are nested under a retrieval (document/vector-index/retrieval),
 mirroring `retrievals.py`: building a prompt is a read-oriented action
 over an already-completed retrieval, so it requires Document VIEWER+
 like creating a retrieval does, not ADMIN+.
+
+`list_prompt_templates` is also this app's Metadata/API Cache example
+(docs/02-architecture.md section 148, Phase 17) — a real, frequently-hit
+DB read (every Prompt Playground load) cached for
+`metadata_cache_ttl_seconds` and explicitly invalidated by the two write
+paths below (`create_prompt_template`/`archive_prompt_template`) rather
+than left to expire stale.
 """
 
 import uuid
@@ -19,6 +26,8 @@ from fastapi import APIRouter, Depends, Request
 from app.api.document_deps import DocumentAccess, require_document_role
 from app.api.prompt_deps import get_prompt_service, get_prompt_template_service
 from app.api.tenancy_deps import require_repository_role
+from app.core.cache.store import CacheStore
+from app.core.config import get_settings
 from app.models.membership import MemberRole
 from app.models.repository import RepositoryMember
 from app.schemas.common import SuccessResponse
@@ -33,9 +42,15 @@ from app.services.prompt_template_service import PromptTemplateService
 
 router = APIRouter(tags=["prompts"])
 
+_PROMPT_TEMPLATES_CACHE_TYPE = "metadata"
+
 
 def _request_id(request: Request) -> str:
     return getattr(request.state, "request_id", str(uuid.uuid4()))
+
+
+def _prompt_templates_cache_key(repository_id: uuid.UUID) -> str:
+    return f"prompt-templates:{repository_id}"
 
 
 @router.post(
@@ -56,6 +71,10 @@ async def create_prompt_template(
         output_schema=payload.output_schema,
         actor_id=membership.user_id,
     )
+    settings = get_settings()
+    if settings.cache_enabled:
+        cache_store = CacheStore(_PROMPT_TEMPLATES_CACHE_TYPE, settings.metadata_cache_ttl_seconds)
+        await cache_store.delete(_prompt_templates_cache_key(membership.repository_id))
     return SuccessResponse(
         data=PromptTemplateRead.model_validate(template), request_id=_request_id(request)
     )
@@ -70,11 +89,25 @@ async def list_prompt_templates(
     membership: RepositoryMember = Depends(require_repository_role(MemberRole.VIEWER)),
     service: PromptTemplateService = Depends(get_prompt_template_service),
 ) -> SuccessResponse[list[PromptTemplateRead]]:
+    settings = get_settings()
+    cache_store = CacheStore(_PROMPT_TEMPLATES_CACHE_TYPE, settings.metadata_cache_ttl_seconds)
+    cache_key = _prompt_templates_cache_key(membership.repository_id)
+
+    if settings.cache_enabled:
+        cached = await cache_store.get(cache_key)
+        if cached is not None:
+            return SuccessResponse(
+                data=[PromptTemplateRead.model_validate(d) for d in cached],
+                request_id=_request_id(request),
+            )
+
     templates = await service.list_by_repository(membership.repository_id)
-    return SuccessResponse(
-        data=[PromptTemplateRead.model_validate(t) for t in templates],
-        request_id=_request_id(request),
-    )
+    data = [PromptTemplateRead.model_validate(t) for t in templates]
+
+    if settings.cache_enabled:
+        await cache_store.set(cache_key, [d.model_dump(mode="json") for d in data])
+
+    return SuccessResponse(data=data, request_id=_request_id(request))
 
 
 @router.get(
@@ -123,6 +156,10 @@ async def archive_prompt_template(
     template = await service.set_active(
         membership.repository_id, template_id, is_active=False, actor_id=membership.user_id
     )
+    settings = get_settings()
+    if settings.cache_enabled:
+        cache_store = CacheStore(_PROMPT_TEMPLATES_CACHE_TYPE, settings.metadata_cache_ttl_seconds)
+        await cache_store.delete(_prompt_templates_cache_key(membership.repository_id))
     return SuccessResponse(
         data=PromptTemplateRead.model_validate(template), request_id=_request_id(request)
     )

@@ -6,6 +6,7 @@ by name over the same Redis broker the worker already consumes from.
 """
 
 from celery import Celery
+from celery.result import AsyncResult
 
 from app.core.config import get_settings
 from app.core.logging import get_logger
@@ -13,13 +14,22 @@ from app.core.logging import get_logger
 logger = get_logger(__name__)
 
 
-def _build_client() -> Celery:
+def _build_client(*, with_result_backend: bool = False) -> Celery:
     settings = get_settings()
     client = Celery("enterprise_rag_studio_client", broker=settings.redis_url)
     # Must match the worker's `task_default_queue` (common/celery_app.py) —
     # otherwise `send_task` publishes to Celery's built-in "celery" queue,
     # which nothing consumes, and the task silently never runs.
     client.conf.task_default_queue = "default"
+    if with_result_backend:
+        # Every other `enqueue_*` below is fire-and-forget (the worker
+        # writes its result to a tracked DB row instead), so they never
+        # need this. `embed_query_text` (Phase 17 Semantic Cache) has no
+        # such row — it's a pure computation — so its caller needs the
+        # actual Celery result, which requires a result backend to fetch
+        # it from (the worker's `common/celery_app.py` already configures
+        # one on the same Redis instance).
+        client.conf.result_backend = settings.redis_url
     return client
 
 
@@ -92,3 +102,22 @@ def enqueue_execute_retrieval(retrieval_id: str) -> None:
         logger.error(
             "enqueue_execute_retrieval_failed", retrieval_id=retrieval_id, error=str(exc)
         )
+
+
+def send_embed_query_text(vector_index_id: str, query_text: str) -> AsyncResult | None:
+    """Enqueue `retrieval_worker.embed_query_text` and return its `AsyncResult`
+    (unlike every `enqueue_*` above, the caller needs the actual return
+    value — see `_build_client`'s `with_result_backend` note). Returns
+    None if enqueueing itself fails, so callers can treat that the same
+    as a cache-miss rather than raising.
+    """
+    client = _build_client(with_result_backend=True)
+    try:
+        return client.send_task(
+            "retrieval_worker.embed_query_text", args=[vector_index_id, query_text]
+        )
+    except Exception as exc:  # noqa: BLE001 - caller falls back to a cache-miss
+        logger.error(
+            "send_embed_query_text_failed", vector_index_id=vector_index_id, error=str(exc)
+        )
+        return None

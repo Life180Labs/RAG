@@ -69,6 +69,17 @@ class Settings(BaseSettings):
     # same shape of gap as an unset cloud API key.
     ollama_base_url: str = "http://localhost:11434"
 
+    # Caching (Phase 17, docs/02-architecture.md sections 99-102/148) —
+    # TTLs are configurable per docs/02-architecture.md section 148.
+    cache_enabled: bool = True
+    retrieval_cache_ttl_seconds: int = 3600
+    prompt_cache_ttl_seconds: int = 86400
+    metadata_cache_ttl_seconds: int = 60
+    # Cosine similarity (1 - cosine distance) above which a semantic cache
+    # entry is considered a hit; pgvector's `<=>` operator returns cosine
+    # *distance*, so a lookup filters `1 - (embedding <=> query) >= this`.
+    semantic_cache_similarity_threshold: float = 0.92
+
 
 @lru_cache
 def get_settings() -> Settings:

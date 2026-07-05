@@ -11,12 +11,22 @@ and turned into a `status="failed"` row with `attempted_providers`
 filled in, rather than a bare 500, so a failed generation is just as
 inspectable as a successful one (mirrors `PromptService`'s own
 budget-exhausted-failure handling from Phase 14).
+
+Prompt Cache (docs/02-architecture.md section 101, Phase 17): only
+checked/populated when the caller pins an explicit `provider`+`model` —
+"useful for benchmarks, automated evaluations, internal testing" per the
+architecture doc, i.e. a controlled scenario where the model is a fixed
+variable, not a `routing_hint`/default request whose resolved
+provider/model can legitimately vary call to call.
 """
 
 import time
 import uuid
 from dataclasses import asdict
 
+from app.core.cache.keys import hash_text, prompt_cache_key
+from app.core.cache.store import CacheStore
+from app.core.config import get_settings
 from app.core.exceptions import ConflictError, NotFoundError
 from app.core.llm.base import (
     InvalidRequestError,
@@ -78,6 +88,41 @@ class LLMService:
         )
         assert prompt.rendered_prompt is not None
 
+        settings = get_settings()
+        cache_key: str | None = None
+        if settings.cache_enabled and payload.provider and payload.model:
+            cache_key = prompt_cache_key(
+                prompt.rendered_prompt,
+                payload.provider,
+                payload.model,
+                hash_text(prompt.rendered_context or ""),
+            )
+            cache_store = CacheStore("prompt", settings.prompt_cache_ttl_seconds)
+            cached = await cache_store.get(cache_key)
+            if cached is not None:
+                llm_request = LLMRequest(
+                    prompt_id=prompt_id,
+                    provider=payload.provider,
+                    model=payload.model,
+                    routing_hint=payload.routing_hint,
+                    input_text=prompt.rendered_prompt,
+                    stream=False,
+                    json_mode=payload.json_mode,
+                    created_by=actor_id,
+                    output_text=cached["output_text"],
+                    input_tokens=cached["input_tokens"],
+                    output_tokens=cached["output_tokens"],
+                    cost_usd=0.0,
+                    latency_ms=0,
+                    attempted_providers=[
+                        {"provider": payload.provider, "model": payload.model, "error": None}
+                    ],
+                    status=LLMRequestStatus.COMPLETED,
+                )
+                await self.llm_requests.add(llm_request)
+                await self._record_audit(actor_id, llm_request, result="success")
+                return llm_request
+
         llm_request = LLMRequest(
             prompt_id=prompt_id,
             provider=payload.provider or "",
@@ -130,6 +175,18 @@ class LLMService:
         llm_request.latency_ms = latency_ms
         llm_request.attempted_providers = [asdict(a) for a in attempts]
         llm_request.status = LLMRequestStatus.COMPLETED
+
+        if cache_key is not None:
+            cache_store = CacheStore("prompt", settings.prompt_cache_ttl_seconds)
+            await cache_store.set(
+                cache_key,
+                {
+                    "output_text": result.text,
+                    "input_tokens": result.input_tokens,
+                    "output_tokens": result.output_tokens,
+                },
+            )
+
         await self.llm_requests.add(llm_request)
         await self._record_audit(actor_id, llm_request, result="success")
         return llm_request

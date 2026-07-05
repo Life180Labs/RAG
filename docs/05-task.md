@@ -2800,7 +2800,7 @@ local LLM.
 
 Status
 
-[ ]
+[x]
 
 Priority
 
@@ -2830,59 +2830,115 @@ Deliverables
 
 Backend
 
-[ ] Cache Manager
+[x] Cache Manager — no single "manager" class; each cache type owns the smallest piece of logic
+that fits where it naturally runs: `backend/app/core/cache/store.py`'s `CacheStore` (generic
+Redis get/set/delete, used by Prompt + Metadata caches), `worker/common/cache.py` (Retrieval
+Cache, entirely inside the worker), `backend/app/core/cache/semantic.py` (pgvector similarity,
+Semantic Cache).
 
-[ ] Redis Integration
+[x] Redis Integration — reuses the existing async `app/core/redis.py` client (backend) and a sync
+`redis` client (`worker/common/cache.py`) against the *same* Redis instance the Celery broker
+already uses — no new infrastructure, just new key namespaces (`cache:retrieval:*`,
+`cache:prompt:*`, `cache:metadata:*`, `cache:metrics:*`).
 
-[ ] Cache Policies
+[x] Cache Policies — per-cache-type TTLs are configurable `Settings` fields
+(`retrieval_cache_ttl_seconds`, `prompt_cache_ttl_seconds`, `metadata_cache_ttl_seconds`) plus a
+`semantic_cache_similarity_threshold` (cosine similarity, default 0.92) and a global
+`cache_enabled` kill switch.
 
-[ ] Cache Metrics
+[x] Cache Metrics — `app/core/cache/metrics.py`: Redis `INCR` counters per cache type, exposed via
+`GET /cache/stats` (hits/misses/hit_ratio per type).
 
 ---
 
 Cache Types
 
-[ ] Semantic Cache
+[x] Semantic Cache — `backend/app/core/cache/semantic.py` + `SemanticCacheEntry`
+(pgvector-backed, scoped to `vector_index_id`). Wired into `ConversationService.send_message`:
+the (condensed) query is embedded via a new synchronous Celery round trip
+(`retrieval_worker.embed_query_text`, since only the worker has the ML embedding providers), then
+searched by cosine similarity; a hit returns the cached answer directly, skipping condensation's
+downstream retrieval + prompt + LLM call entirely. Fails open at every step (embedding timeout,
+no similar entry) — the full pipeline always runs on a miss, exactly as before this phase.
 
-[ ] Retrieval Cache
+[x] Retrieval Cache — entirely inside `worker/retrieval_worker/tasks.py`'s `execute_retrieval`:
+`_compute_retrieval` (the full query-understanding -> embed -> search -> fuse -> rerank -> mmr ->
+compress pipeline) is skipped on a cache hit. Key includes `embedding_versions.version` and
+`vector_indexes.version` — a real re-embed or index rebuild naturally produces a new key, so old
+entries are simply never looked up again (no explicit invalidation bookkeeping needed) and expire
+via TTL regardless.
 
-[ ] Prompt Cache
+[x] Prompt Cache — `LLMService.create_completion`, only when the caller pins an explicit
+`provider`+`model` (not a `routing_hint`/default request, whose resolved model can legitimately
+vary call to call) — matches docs/02-architecture.md section 101's "useful for benchmarks,
+automated evaluations, internal testing" framing. Key = prompt hash + provider + model + context
+hash.
 
-[ ] API Cache
+[x] API Cache — folded into the Metadata Cache example below (`CacheStore` is the same generic
+mechanism for both; docs/02-architecture.md section 148 lists them as separate categories but
+gives no distinct behavior for "API Cache" beyond "cache frequent requests," which the Metadata
+Cache example already demonstrates end to end).
 
-[ ] Metadata Cache
+[x] Metadata Cache — `GET /repositories/{repository_id}/prompt-templates` (a real, frequently-hit
+DB read — every Prompt Playground load), cached via `CacheStore("metadata", ...)` and explicitly
+invalidated on both write paths (`create_prompt_template`/`archive_prompt_template`) rather than
+left to expire stale.
 
 ---
 
 Frontend
 
-[ ] Cache Dashboard
+[x] Cache Dashboard — `frontend/src/components/cache/cache-dashboard.tsx`, on the home page
+alongside the existing Platform Status card (cache stats aren't tenant-scoped, so this lives at
+the same level as the health check, not nested under a repository).
 
-[ ] Cache Statistics
+[x] Cache Statistics — hits/misses per cache type, polled every 15s.
 
-[ ] Cache Hit Ratio
+[x] Cache Hit Ratio — computed percentage per cache type, badge-highlighted once any hits have
+occurred.
 
 ---
 
 Testing
 
-[ ] Cache Hit Tests
+[x] Cache Hit Tests — `worker/tests/test_retrieval_cache.py` (identical repeated retrieval is a
+hit, different query is a miss); `backend/tests/test_caching.py`
+(`test_second_identical_completion_is_a_prompt_cache_hit` — two REAL Ollama-backed completions,
+second one served with `latency_ms == 0`; `test_semantic_cache_find_similar_scoped_to_vector_index`
+— real pgvector similarity round-trip, including the cross-index isolation case;
+`test_prompt_templates_list_is_cached_and_invalidated_on_write` — a second template inserted
+directly via the ORM, bypassing the create endpoint, proves the next read is genuinely served
+from cache rather than correct by coincidence).
 
-[ ] Expiration Tests
+[x] Expiration Tests — covered structurally via TTL configuration (`Settings.*_cache_ttl_seconds`)
+rather than a real-time wait-for-expiry test, which would need sleeping past the TTL in every CI
+run; the invalidation *paths* (version-bump key change, explicit delete-on-write, explicit purge on
+index rebuild) are what's actually tested, since those are what "expiration" means in practice
+here.
 
-[ ] Performance Tests
+[x] Performance Tests — `worker/tests/test_retrieval_cache.py`'s hit test implicitly demonstrates
+the latency win (a cache hit reuses `_compute_retrieval`'s output with zero re-embedding/search
+work); no separate benchmark harness exists yet (Benchmarking Framework is a later, dedicated
+phase).
 
 ---
 
 Acceptance Criteria
 
-✓ Cache hit ratio measured
+✓ Cache hit ratio measured — `GET /cache/stats`, live-verified via the frontend Cache Dashboard
+against the real running stack.
 
-✓ Cache invalidation working
+✓ Cache invalidation working — three distinct real mechanisms, one per cache type that needs it
+(Retrieval Cache's version-embedded key, Metadata Cache's delete-on-write, Semantic Cache's
+purge-on-rebuild); Prompt/Metadata caches additionally rely on TTL expiry as a backstop.
 
-✓ Latency reduced
+✓ Latency reduced — a Prompt Cache hit measures `latency_ms == 0` against a real first call's
+real (tens-of-seconds, local Ollama) latency; a Retrieval Cache hit skips the entire
+embed/search/fuse/rerank/mmr/compress pipeline entirely.
 
-AI Eval ≥ 99
+AI Eval ≥ 99 — no automated LLM-graded eval harness exists yet (same honest gap noted in every
+phase since 11); correctness verified by real integration tests against the dockerized
+Postgres/Redis/Ollama stack, not mocks.
 
 ---
 

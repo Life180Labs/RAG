@@ -1,3 +1,4 @@
+import { CacheDashboard } from '@/components/cache/cache-dashboard';
 import { HealthDashboard } from '@/components/health-dashboard';
 import { TopNav } from '@/components/top-nav';
 
@@ -13,6 +14,7 @@ export default function HomePage() {
           </p>
         </div>
         <HealthDashboard />
+        <CacheDashboard />
       </main>
     </>
   );

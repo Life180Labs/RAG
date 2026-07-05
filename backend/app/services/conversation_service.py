@@ -31,6 +31,9 @@ exception to the "services only flush, `get_db` commits" convention.
 import asyncio
 import uuid
 
+from app.core.cache import semantic as semantic_cache
+from app.core.cache.embedding_client import embed_query_text
+from app.core.config import get_settings
 from app.core.conversation.condensation import condense_query
 from app.core.conversation.summarization import summarize_messages
 from app.core.exceptions import NotFoundError
@@ -221,6 +224,37 @@ class ConversationService:
         gateway = LLMGateway()
         standalone_query = await condense_query(gateway, history_text, payload.content)
 
+        # Semantic Cache (docs/02-architecture.md section 99, Phase 17):
+        # embed the standalone query and check for a near-duplicate past
+        # question on this same vector index before paying for a real
+        # retrieval + prompt + completion. Fails open at every step (no
+        # embedding, no similar entry, embedding provider unreachable) —
+        # `query_vector` stays None and the full pipeline below runs
+        # exactly as it always has.
+        settings = get_settings()
+        query_vector: list[float] | None = None
+        if settings.cache_enabled:
+            query_vector = await embed_query_text(str(vector_index_id), standalone_query)
+            if query_vector is not None:
+                cached_entry = await semantic_cache.find_similar(
+                    self.session, vector_index_id, query_vector
+                )
+                if cached_entry is not None:
+                    cached_entry.hit_count += 1
+                    assistant_message = await self.messages.add(
+                        Message(
+                            conversation_id=conversation.id,
+                            role=MessageRole.ASSISTANT,
+                            content=cached_entry.answer_text,
+                            token_count=count_tokens(cached_entry.answer_text),
+                        )
+                    )
+                    conversation.total_tokens += (
+                        user_message.token_count + assistant_message.token_count
+                    )
+                    await self._record_audit(actor_id, "conversation.message", conversation.id)
+                    return user_message, assistant_message
+
         retrieval = await self.retrievals.create_retrieval(
             document.id,
             vector_index_id,
@@ -282,6 +316,17 @@ class ConversationService:
         )
 
         conversation.total_tokens += user_message.token_count + assistant_message.token_count
+
+        if settings.cache_enabled and query_vector is not None:
+            await semantic_cache.upsert_entry(
+                self.session,
+                repository_id=conversation.repository_id,
+                vector_index_id=vector_index_id,
+                query_text=standalone_query,
+                query_vector=query_vector,
+                answer_text=assistant_content,
+            )
+
         await self._maybe_summarize(conversation, gateway)
         await self._record_audit(actor_id, "conversation.message", conversation.id)
 
