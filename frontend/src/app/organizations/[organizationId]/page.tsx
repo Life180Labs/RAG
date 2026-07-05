@@ -9,10 +9,8 @@ export default async function OrganizationDetailPage({
   const { organizationId } = await params;
 
   return (
-    <main className="flex flex-1 justify-center p-8">
-      <AuthGuard>
-        <OrganizationDetail organizationId={organizationId} />
-      </AuthGuard>
-    </main>
+    <AuthGuard>
+      <OrganizationDetail organizationId={organizationId} />
+    </AuthGuard>
   );
 }

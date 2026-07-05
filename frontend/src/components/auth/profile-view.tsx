@@ -19,11 +19,11 @@ export function ProfileView() {
   const [success, setSuccess] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  if (!user) {
-    // AuthGuard only renders this component once authenticated, but the
-    // type is nullable — this satisfies the empty state requirement.
-    return null;
-  }
+  if (!user) return null;
+
+  const initials = user.full_name
+    ? user.full_name.split(' ').map((n) => n[0]).join('').toUpperCase().slice(0, 2)
+    : user.email.slice(0, 2).toUpperCase();
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -42,55 +42,69 @@ export function ProfileView() {
   }
 
   return (
-    <Card className="w-full max-w-md">
-      <CardHeader className="flex flex-row items-center justify-between">
-        <CardTitle>Profile</CardTitle>
-        <Badge variant="secondary">{user.role}</Badge>
-      </CardHeader>
-      <CardContent className="space-y-6">
-        <dl className="text-sm">
-          <div className="flex justify-between py-1">
-            <dt className="text-muted-foreground">Email</dt>
-            <dd>{user.email}</dd>
-          </div>
-          <div className="flex justify-between py-1">
-            <dt className="text-muted-foreground">Member since</dt>
-            <dd>{new Date(user.created_at).toLocaleDateString()}</dd>
-          </div>
-        </dl>
+    <div className="w-full max-w-md space-y-4">
+      <div className="flex items-center gap-4">
+        <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-primary/20 text-sm font-semibold text-primary">
+          {initials}
+        </div>
+        <div>
+          <p className="font-semibold text-foreground">{user.full_name || user.email}</p>
+          <p className="text-sm text-muted-foreground">{user.email}</p>
+        </div>
+        <Badge variant="secondary" className="ml-auto">
+          {user.role}
+        </Badge>
+      </div>
 
-        <form className="space-y-4" onSubmit={handleSubmit}>
-          {error && (
-            <Alert variant="destructive">
-              <AlertTitle>Update failed</AlertTitle>
-              <AlertDescription>{error}</AlertDescription>
-            </Alert>
-          )}
-          {success && (
-            <Alert data-testid="profile-update-success">
-              <AlertTitle>Profile updated</AlertTitle>
-            </Alert>
-          )}
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="text-sm font-medium">Account details</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <dl className="text-sm divide-y divide-border">
+            <div className="flex justify-between py-2.5">
+              <dt className="text-muted-foreground">Email</dt>
+              <dd className="font-medium text-foreground">{user.email}</dd>
+            </div>
+            <div className="flex justify-between py-2.5">
+              <dt className="text-muted-foreground">Member since</dt>
+              <dd className="font-medium text-foreground">{new Date(user.created_at).toLocaleDateString()}</dd>
+            </div>
+          </dl>
 
-          <div className="space-y-2">
-            <Label htmlFor="full_name">Full name</Label>
-            <Input
-              id="full_name"
-              required
-              value={fullName}
-              onChange={(e) => setFullName(e.target.value)}
-            />
-          </div>
+          <form className="space-y-3 pt-2" onSubmit={handleSubmit}>
+            {error && (
+              <Alert variant="destructive">
+                <AlertTitle>Update failed</AlertTitle>
+                <AlertDescription>{error}</AlertDescription>
+              </Alert>
+            )}
+            {success && (
+              <Alert data-testid="profile-update-success">
+                <AlertTitle>Profile updated</AlertTitle>
+              </Alert>
+            )}
 
-          <Button type="submit" disabled={isSubmitting}>
-            {isSubmitting ? 'Saving…' : 'Save changes'}
-          </Button>
-        </form>
+            <div className="space-y-1.5">
+              <Label htmlFor="full_name">Full name</Label>
+              <Input
+                id="full_name"
+                required
+                value={fullName}
+                onChange={(e) => setFullName(e.target.value)}
+              />
+            </div>
 
-        <Button variant="outline" className="w-full" onClick={() => logout()}>
-          Sign out
-        </Button>
-      </CardContent>
-    </Card>
+            <Button type="submit" size="sm" disabled={isSubmitting}>
+              {isSubmitting ? 'Saving…' : 'Save changes'}
+            </Button>
+          </form>
+        </CardContent>
+      </Card>
+
+      <Button variant="outline" className="w-full" onClick={() => logout()}>
+        Sign out
+      </Button>
+    </div>
   );
 }

@@ -46,43 +46,45 @@ export function RegisterForm() {
   }
 
   return (
-    <Card className="w-full max-w-sm">
-      <CardHeader>
-        <CardTitle>Create your account</CardTitle>
+    <Card className="w-full max-w-sm border-border/60">
+      <CardHeader className="pb-4 text-center">
+        <h1 className="text-base font-semibold text-foreground">Create your account</h1>
+        <p className="text-xs text-muted-foreground">Get started with RAG Studio</p>
       </CardHeader>
       <CardContent>
         <form className="space-y-4" onSubmit={handleSubmit}>
           {error && (
             <Alert variant="destructive" data-testid="register-error">
-              <AlertTitle>Registration failed</AlertTitle>
               <AlertDescription>{error}</AlertDescription>
             </Alert>
           )}
 
-          <div className="space-y-2">
+          <div className="space-y-1.5">
             <Label htmlFor="full_name">Full name</Label>
             <Input
               id="full_name"
               autoComplete="name"
               required
+              placeholder="Jane Smith"
               value={fullName}
               onChange={(e) => setFullName(e.target.value)}
             />
           </div>
 
-          <div className="space-y-2">
-            <Label htmlFor="email">Email</Label>
+          <div className="space-y-1.5">
+            <Label htmlFor="email">Work email</Label>
             <Input
               id="email"
               type="email"
               autoComplete="email"
               required
+              placeholder="jane@company.com"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
             />
           </div>
 
-          <div className="space-y-2">
+          <div className="space-y-1.5">
             <Label htmlFor="password">Password</Label>
             <Input
               id="password"
@@ -92,19 +94,22 @@ export function RegisterForm() {
               value={password}
               onChange={(e) => setPassword(e.target.value)}
             />
-            <p className="text-muted-foreground text-xs">
-              At least 12 characters, with upper, lower, digit, and special character.
-            </p>
-            {passwordError && <p className="text-destructive text-xs">{passwordError}</p>}
+            {passwordError ? (
+              <p className="text-xs text-destructive">{passwordError}</p>
+            ) : (
+              <p className="text-xs text-muted-foreground">
+                12+ characters with upper, lower, digit, and special character.
+              </p>
+            )}
           </div>
 
           <Button type="submit" className="w-full" disabled={isSubmitting}>
             {isSubmitting ? 'Creating account…' : 'Create account'}
           </Button>
 
-          <p className="text-muted-foreground text-center text-sm">
+          <p className="text-center text-xs text-muted-foreground">
             Already have an account?{' '}
-            <Link href="/login" className="hover:underline">
+            <Link href="/login" className="text-primary hover:underline">
               Sign in
             </Link>
           </p>

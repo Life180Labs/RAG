@@ -9,14 +9,12 @@ export default async function ProjectDashboardPage({
   const { organizationId, workspaceId, projectId } = await params;
 
   return (
-    <main className="flex flex-1 justify-center p-8">
-      <AuthGuard>
-        <ProjectDashboard
-          organizationId={organizationId}
-          workspaceId={workspaceId}
-          projectId={projectId}
-        />
-      </AuthGuard>
-    </main>
+    <AuthGuard>
+      <ProjectDashboard
+        organizationId={organizationId}
+        workspaceId={workspaceId}
+        projectId={projectId}
+      />
+    </AuthGuard>
   );
 }

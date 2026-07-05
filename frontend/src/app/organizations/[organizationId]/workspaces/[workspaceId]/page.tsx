@@ -9,10 +9,8 @@ export default async function WorkspaceDetailPage({
   const { organizationId, workspaceId } = await params;
 
   return (
-    <main className="flex flex-1 justify-center p-8">
-      <AuthGuard>
-        <WorkspaceDetail organizationId={organizationId} workspaceId={workspaceId} />
-      </AuthGuard>
-    </main>
+    <AuthGuard>
+      <WorkspaceDetail organizationId={organizationId} workspaceId={workspaceId} />
+    </AuthGuard>
   );
 }

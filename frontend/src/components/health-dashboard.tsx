@@ -7,14 +7,17 @@ import { Badge } from '@/components/ui/badge';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useHealth } from '@/hooks/use-health';
+import { cn } from '@/lib/utils';
 
 export function HealthDashboard() {
   const { data, isLoading, isError, error } = useHealth();
 
   return (
-    <Card className="w-full max-w-md">
-      <CardHeader>
-        <CardTitle>Platform Status</CardTitle>
+    <Card className="border-border">
+      <CardHeader className="pb-2">
+        <CardTitle className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+          API Status
+        </CardTitle>
       </CardHeader>
       <CardContent>
         {isLoading && (
@@ -35,10 +38,19 @@ export function HealthDashboard() {
         )}
 
         {data && (
-          <div className="flex items-center justify-between" data-testid="health-success">
-            <span className="text-muted-foreground text-sm">API status</span>
-            <Badge variant={data.status === 'healthy' ? 'default' : 'destructive'}>
-              {data.status} · {data.environment}
+          <div className="flex items-center gap-3" data-testid="health-success">
+            <span
+              className={cn(
+                'h-2 w-2 rounded-full',
+                data.status === 'healthy' ? 'bg-green-400' : 'bg-red-400',
+              )}
+            />
+            <div className="flex-1">
+              <p className="text-sm font-medium text-foreground capitalize">{data.status}</p>
+              <p className="text-xs text-muted-foreground">{data.environment}</p>
+            </div>
+            <Badge variant={data.status === 'healthy' ? 'default' : 'destructive'} className="text-[0.7rem]">
+              {data.status}
             </Badge>
           </div>
         )}

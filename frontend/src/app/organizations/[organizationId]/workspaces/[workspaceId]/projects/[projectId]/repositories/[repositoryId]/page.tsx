@@ -14,15 +14,13 @@ export default async function RepositoryDashboardPage({
   const { organizationId, workspaceId, projectId, repositoryId } = await params;
 
   return (
-    <main className="flex flex-1 justify-center p-8">
-      <AuthGuard>
-        <RepositoryDashboard
-          organizationId={organizationId}
-          workspaceId={workspaceId}
-          projectId={projectId}
-          repositoryId={repositoryId}
-        />
-      </AuthGuard>
-    </main>
+    <AuthGuard>
+      <RepositoryDashboard
+        organizationId={organizationId}
+        workspaceId={workspaceId}
+        projectId={projectId}
+        repositoryId={repositoryId}
+      />
+    </AuthGuard>
   );
 }

@@ -2,6 +2,7 @@
 
 import { useQueryClient } from '@tanstack/react-query';
 import Link from 'next/link';
+import { ChevronRight, Pencil, Plus } from 'lucide-react';
 import { useState } from 'react';
 
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
@@ -17,6 +18,12 @@ import { useProject } from '@/hooks/use-tenancy';
 import { ApiRequestError } from '@/services/api-client';
 import { updateProject } from '@/services/tenancy-service';
 
+function statusVariant(status: string): 'default' | 'secondary' | 'outline' {
+  if (status === 'active') return 'default';
+  if (status === 'archived') return 'outline';
+  return 'secondary';
+}
+
 export function ProjectDashboard({
   organizationId,
   workspaceId,
@@ -27,36 +34,31 @@ export function ProjectDashboard({
   projectId: string;
 }) {
   const { data: project, isLoading, isError } = useProject(projectId);
-  const {
-    data: repositories,
-    isLoading: isRepositoriesLoading,
-    isError: isRepositoriesError,
-  } = useRepositories(projectId);
+  const { data: repositories, isLoading: isRepositoriesLoading, isError: isRepositoriesError } = useRepositories(projectId);
   const queryClient = useQueryClient();
   const [name, setName] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [showRename, setShowRename] = useState(false);
+  const [showCreate, setShowCreate] = useState(false);
 
   if (isLoading) {
     return (
-      <div className="w-full max-w-2xl space-y-3" data-testid="project-dashboard-loading">
-        <Skeleton className="h-8 w-1/2" />
-        <Skeleton className="h-24 w-full" />
+      <div className="w-full max-w-3xl space-y-4" data-testid="project-dashboard-loading">
+        <Skeleton className="h-8 w-56" />
+        <Skeleton className="h-40 w-full" />
       </div>
     );
   }
 
   if (isError || !project) {
     return (
-      <Alert variant="destructive" className="w-full max-w-2xl">
+      <Alert variant="destructive" className="w-full max-w-3xl">
         <AlertTitle>Couldn&apos;t load this project</AlertTitle>
         <AlertDescription>
           You may not have access, or it doesn&apos;t exist.{' '}
-          <Link
-            href={`/organizations/${organizationId}/workspaces/${workspaceId}`}
-            className="underline"
-          >
+          <Link href={`/organizations/${organizationId}/workspaces/${workspaceId}`} className="underline">
             Back to workspace
           </Link>
         </AlertDescription>
@@ -64,7 +66,7 @@ export function ProjectDashboard({
     );
   }
 
-  async function handleSubmit(e: React.FormEvent) {
+  async function handleRename(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
     setSuccess(false);
@@ -73,6 +75,7 @@ export function ProjectDashboard({
       await updateProject(projectId, { name: name || project!.name });
       await queryClient.invalidateQueries({ queryKey: ['projects', projectId] });
       setSuccess(true);
+      setShowRename(false);
     } catch (err) {
       setError(err instanceof ApiRequestError ? err.message : 'Unable to update project.');
     } finally {
@@ -81,95 +84,124 @@ export function ProjectDashboard({
   }
 
   return (
-    <div className="w-full max-w-2xl space-y-6">
-      <div className="flex items-center justify-between">
+    <div className="w-full max-w-3xl space-y-6">
+      <div className="flex items-start justify-between">
         <div>
-          <h1 className="text-xl font-semibold">{project.name}</h1>
-          <p className="text-muted-foreground text-sm">/{project.slug}</p>
+          <div className="flex items-center gap-2">
+            <h1 className="text-xl font-semibold text-foreground">{project.name}</h1>
+            <Badge variant={statusVariant(project.status)}>{project.status}</Badge>
+          </div>
+          <p className="mt-0.5 text-sm text-muted-foreground">/{project.slug}</p>
         </div>
-        <Badge variant={project.status === 'active' ? 'default' : 'secondary'}>
-          {project.status}
-        </Badge>
+        <div className="flex gap-2">
+          <Button size="sm" variant="outline" className="gap-1.5" onClick={() => setShowRename((v) => !v)}>
+            <Pencil className="h-3.5 w-3.5" />
+            Rename
+          </Button>
+          <Button size="sm" className="gap-1.5" onClick={() => setShowCreate((v) => !v)}>
+            <Plus className="h-3.5 w-3.5" />
+            New repository
+          </Button>
+        </div>
       </div>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>Rename project</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <form className="flex flex-col gap-3 sm:flex-row sm:items-end" onSubmit={handleSubmit}>
-            {error && (
-              <Alert variant="destructive" className="sm:basis-full">
-                <AlertTitle>Update failed</AlertTitle>
-                <AlertDescription>{error}</AlertDescription>
-              </Alert>
-            )}
-            {success && (
-              <Alert data-testid="project-update-success" className="sm:basis-full">
-                <AlertTitle>Project updated</AlertTitle>
-              </Alert>
-            )}
-            <div className="flex-1 space-y-1">
-              <Label htmlFor="project-name">Name</Label>
-              <Input
-                id="project-name"
-                placeholder={project.name}
-                value={name}
-                onChange={(e) => setName(e.target.value)}
-              />
-            </div>
-            <Button type="submit" disabled={isSubmitting}>
-              {isSubmitting ? 'Saving…' : 'Save'}
-            </Button>
-          </form>
-        </CardContent>
-      </Card>
+      {success && (
+        <Alert data-testid="project-update-success">
+          <AlertTitle>Project renamed</AlertTitle>
+        </Alert>
+      )}
+
+      {showRename && (
+        <Card className="border-border">
+          <CardHeader className="pb-3">
+            <CardTitle className="text-sm font-medium">Rename project</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <form className="flex items-end gap-3" onSubmit={handleRename}>
+              {error && (
+                <Alert variant="destructive" className="basis-full">
+                  <AlertTitle>Update failed</AlertTitle>
+                  <AlertDescription>{error}</AlertDescription>
+                </Alert>
+              )}
+              <div className="flex-1 space-y-1.5">
+                <Label htmlFor="project-name">Name</Label>
+                <Input
+                  id="project-name"
+                  placeholder={project.name}
+                  value={name}
+                  onChange={(e) => setName(e.target.value)}
+                />
+              </div>
+              <Button type="submit" disabled={isSubmitting}>
+                {isSubmitting ? 'Saving…' : 'Save'}
+              </Button>
+            </form>
+          </CardContent>
+        </Card>
+      )}
+
+      {showCreate && (
+        <Card className="border-primary/20 bg-card">
+          <CardHeader className="pb-3">
+            <CardTitle className="text-sm font-medium">Create repository</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <CreateRepositoryForm projectId={projectId} />
+          </CardContent>
+        </Card>
+      )}
 
       <Card>
-        <CardHeader>
-          <CardTitle>New repository</CardTitle>
+        <CardHeader className="pb-3">
+          <CardTitle className="text-sm font-medium text-muted-foreground uppercase tracking-wide">
+            Repositories
+          </CardTitle>
         </CardHeader>
-        <CardContent>
-          <CreateRepositoryForm projectId={projectId} />
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader>
-          <CardTitle>Repositories</CardTitle>
-        </CardHeader>
-        <CardContent>
+        <CardContent className="p-0">
           {isRepositoriesLoading && (
-            <div className="space-y-2" data-testid="repositories-loading">
-              <Skeleton className="h-10 w-full" />
+            <div className="space-y-px p-1" data-testid="repositories-loading">
+              <Skeleton className="h-14 w-full rounded-lg" />
             </div>
           )}
 
           {isRepositoriesError && (
-            <Alert variant="destructive">
-              <AlertTitle>Couldn&apos;t load repositories</AlertTitle>
-            </Alert>
+            <div className="p-4">
+              <Alert variant="destructive">
+                <AlertTitle>Couldn&apos;t load repositories</AlertTitle>
+              </Alert>
+            </div>
           )}
 
           {repositories && repositories.length === 0 && (
-            <p className="text-muted-foreground text-sm" data-testid="repositories-empty">
-              No repositories yet. Create one above.
-            </p>
+            <div className="flex flex-col items-center justify-center py-10 text-center" data-testid="repositories-empty">
+              <p className="text-sm text-muted-foreground">No repositories yet.</p>
+              <Button size="sm" variant="outline" className="mt-3 gap-1.5" onClick={() => setShowCreate(true)}>
+                <Plus className="h-3.5 w-3.5" />
+                Create repository
+              </Button>
+            </div>
           )}
 
           {repositories && repositories.length > 0 && (
-            <ul className="divide-border divide-y" data-testid="repositories-list">
+            <ul className="divide-y divide-border" data-testid="repositories-list">
               {repositories.map((repository) => (
-                <li key={repository.id} className="flex items-center justify-between py-3">
+                <li key={repository.id}>
                   <Link
                     href={`/organizations/${organizationId}/workspaces/${workspaceId}/projects/${projectId}/repositories/${repository.id}`}
-                    className="font-medium hover:underline"
+                    className="group flex items-center justify-between px-5 py-3.5 transition-colors hover:bg-muted/20"
                   >
-                    {repository.name}
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-medium text-foreground group-hover:text-primary transition-colors">
+                        {repository.name}
+                      </p>
+                      <p className="text-xs text-muted-foreground">/{repository.slug}</p>
+                    </div>
+                    <div className="ml-4 flex shrink-0 items-center gap-2">
+                      <Badge variant={statusVariant(repository.status)}>{repository.status}</Badge>
+                      <ChevronRight className="h-4 w-4 text-muted-foreground/50 transition-transform group-hover:translate-x-0.5" />
+                    </div>
                   </Link>
-                  <Badge variant={repository.status === 'active' ? 'default' : 'secondary'}>
-                    {repository.status}
-                  </Badge>
                 </li>
               ))}
             </ul>

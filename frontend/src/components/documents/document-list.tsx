@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { Download, Layers, Trash2 } from 'lucide-react';
 
 import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
@@ -10,6 +11,7 @@ import { ChunkExplorer } from '@/components/chunks/chunk-explorer';
 import { useDeleteDocument, useDocuments, useRestoreDocument } from '@/hooks/use-documents';
 import { ApiRequestError } from '@/services/api-client';
 import { downloadDocument } from '@/services/document-service';
+import { cn } from '@/lib/utils';
 import type { Document, DocumentStatus } from '@/types/document';
 
 function formatBytes(bytes: number): string {
@@ -20,9 +22,10 @@ function formatBytes(bytes: number): string {
   return `${exponent === 0 ? value : value.toFixed(1)} ${units[exponent]}`;
 }
 
-function statusVariant(status: DocumentStatus): 'default' | 'secondary' | 'destructive' {
+function statusVariant(status: DocumentStatus): 'default' | 'secondary' | 'destructive' | 'outline' {
   if (status.startsWith('failed')) return 'destructive';
-  if (status === 'ready' || status === 'validated') return 'default';
+  if (status === 'ready') return 'default';
+  if (status === 'validated') return 'secondary';
   return 'secondary';
 }
 
@@ -68,7 +71,12 @@ export function DocumentList({ repositoryId }: { repositoryId: string }) {
   }
 
   if (isLoading) {
-    return <Skeleton className="h-24 w-full" data-testid="document-list-loading" />;
+    return (
+      <div className="space-y-2" data-testid="document-list-loading">
+        <Skeleton className="h-12 w-full" />
+        <Skeleton className="h-12 w-full" />
+      </div>
+    );
   }
 
   if (isError) {
@@ -94,7 +102,7 @@ export function DocumentList({ repositoryId }: { repositoryId: string }) {
             <Button
               variant="link"
               size="sm"
-              className="h-auto p-0"
+              className="h-auto p-0 text-xs"
               onClick={() => handleRestore(lastDeletedId)}
             >
               Undo
@@ -104,50 +112,75 @@ export function DocumentList({ repositoryId }: { repositoryId: string }) {
       )}
 
       {documents && documents.length === 0 && (
-        <p className="text-muted-foreground text-sm" data-testid="document-list-empty">
+        <p className="py-6 text-center text-sm text-muted-foreground" data-testid="document-list-empty">
           No documents uploaded yet.
         </p>
       )}
 
       {documents && documents.length > 0 && (
-        <ul className="divide-border divide-y text-sm" data-testid="document-list">
+        <ul
+          className="divide-y divide-border overflow-hidden rounded-lg border border-border"
+          data-testid="document-list"
+        >
           {documents.map((doc) => (
-            <li key={doc.id} className="space-y-2 py-2">
-              <div className="flex items-center justify-between gap-3">
+            <li key={doc.id}>
+              <div
+                className={cn(
+                  'flex items-center gap-3 bg-card px-4 py-3 text-sm transition-colors hover:bg-muted/20',
+                  expandedChunksId === doc.id && 'bg-muted/10',
+                )}
+              >
                 <div className="min-w-0 flex-1">
-                  <p className="truncate font-medium">{doc.filename}</p>
-                  <p className="text-muted-foreground text-xs">
+                  <p className="truncate font-medium text-foreground">{doc.filename}</p>
+                  <p className="text-xs text-muted-foreground">
                     {formatBytes(doc.size_bytes)} · v{doc.current_version} ·{' '}
                     {new Date(doc.created_at).toLocaleDateString()}
                   </p>
                   {doc.status_message && (
-                    <p className="text-destructive text-xs">{doc.status_message}</p>
+                    <p className="mt-0.5 text-xs text-destructive">{doc.status_message}</p>
                   )}
                 </div>
-                <Badge variant={statusVariant(doc.status)}>{statusLabel(doc.status)}</Badge>
-                <div className="flex gap-1">
-                  <Button variant="ghost" size="sm" onClick={() => handleDownload(doc)}>
-                    Download
+
+                <Badge variant={statusVariant(doc.status)} className="shrink-0">
+                  {statusLabel(doc.status)}
+                </Badge>
+
+                <div className="flex shrink-0 items-center gap-1">
+                  <Button
+                    variant="ghost"
+                    size="icon-sm"
+                    title="Download"
+                    onClick={() => handleDownload(doc)}
+                  >
+                    <Download className="h-3.5 w-3.5" />
                   </Button>
                   <Button
                     variant="ghost"
-                    size="sm"
+                    size="icon-sm"
+                    title="Pipeline"
+                    className={expandedChunksId === doc.id ? 'bg-muted text-foreground' : ''}
                     onClick={() => setExpandedChunksId(expandedChunksId === doc.id ? null : doc.id)}
                   >
-                    Chunks
+                    <Layers className="h-3.5 w-3.5" />
                   </Button>
                   <Button
                     variant="ghost"
-                    size="sm"
+                    size="icon-sm"
+                    title="Delete"
                     onClick={() => handleDelete(doc.id)}
                     disabled={deleteDocument.isPending}
+                    className="text-muted-foreground hover:text-destructive"
                   >
-                    Delete
+                    <Trash2 className="h-3.5 w-3.5" />
                   </Button>
                 </div>
               </div>
 
-              {expandedChunksId === doc.id && <ChunkExplorer documentId={doc.id} />}
+              {expandedChunksId === doc.id && (
+                <div className="border-t border-border bg-background/50 p-4">
+                  <ChunkExplorer documentId={doc.id} />
+                </div>
+              )}
             </li>
           ))}
         </ul>
