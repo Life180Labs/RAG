@@ -106,6 +106,7 @@ def _insert_retrieval(vector_index_id: str, document_id: uuid.UUID, **overrides)
         "dense_weight": None,
         "sparse_weight": None,
         "rrf_k": None,
+        "query_understanding_enabled": False,
         "status": "PENDING",
         "result_count": 0,
         **overrides,
@@ -116,12 +117,12 @@ def _insert_retrieval(vector_index_id: str, document_id: uuid.UUID, **overrides)
                 "INSERT INTO retrievals "
                 "(id, vector_index_id, document_id, query_text, top_k, score_threshold, "
                 "similarity_metric, metadata_filter, retrieval_mode, fusion_method, "
-                "dense_weight, sparse_weight, rrf_k, status, result_count, created_at, "
-                "updated_at) "
+                "dense_weight, sparse_weight, rrf_k, query_understanding_enabled, status, "
+                "result_count, created_at, updated_at) "
                 "VALUES (:id, :vector_index_id, :document_id, :query_text, :top_k, "
                 ":score_threshold, :similarity_metric, CAST(:metadata_filter AS jsonb), "
                 ":retrieval_mode, :fusion_method, :dense_weight, :sparse_weight, :rrf_k, "
-                ":status, :result_count, now(), now())"
+                ":query_understanding_enabled, :status, :result_count, now(), now())"
             ),
             {**fields, "metadata_filter": json.dumps(fields["metadata_filter"])
                 if fields["metadata_filter"] is not None else None},
@@ -345,3 +346,41 @@ def test_execute_retrieval_hybrid_rrf(document_chain):
         ).first()
         assert row.retrieval_mode == "HYBRID"
         assert row.fusion_method == "RRF"
+
+
+def test_execute_retrieval_query_understanding_populates_analysis_fields(document_chain):
+    # No OPENAI_API_KEY in this dev environment (same as the Phase 7
+    # cloud embedding provider tests), so rewrite/expansion fall back to
+    # the documented no-LLM behavior: rewritten_query_text is just the
+    # normalized original, generated_queries is a single-item list. The
+    # point of this test is that the *pipeline wiring* (classify persists
+    # an intent, the fallback still completes the retrieval, filter
+    # extraction still runs) works end-to-end, not that the LLM path
+    # itself was exercised.
+    document_id = _insert_document_with_content(
+        document_chain["repository_id"], document_chain["user_id"]
+    )
+    vector_index_id = _build_pgvector_index(document_id)
+    retrieval_id = _insert_retrieval(
+        vector_index_id,
+        document_id,
+        query_text='What is the policy in "Section One"?',
+        query_understanding_enabled=True,
+    )
+
+    result = execute_retrieval.run(retrieval_id)
+    assert result["status"] == "completed"
+
+    with SessionLocal() as session:
+        row = session.execute(
+            text(
+                "SELECT query_intent, intent_confidence, rewritten_query_text, "
+                "generated_queries, detected_metadata_filter FROM retrievals WHERE id = :id"
+            ),
+            {"id": retrieval_id},
+        ).first()
+        assert row.query_intent == "POLICY_LOOKUP"
+        assert row.intent_confidence is not None
+        assert row.rewritten_query_text == 'What is the policy in "Section One"?'
+        assert row.generated_queries == ['What is the policy in "Section One"?']
+        assert row.detected_metadata_filter == {"heading": "Section One"}

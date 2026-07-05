@@ -17,6 +17,31 @@ export const FUSION_METHODS: { value: FusionMethod; label: string }[] = [
   { value: 'rrf', label: 'Reciprocal rank fusion' },
 ];
 
+export type QueryIntent =
+  | 'fact_lookup'
+  | 'definition'
+  | 'summarization'
+  | 'comparison'
+  | 'multi_hop_reasoning'
+  | 'numerical_query'
+  | 'code_question'
+  | 'table_lookup'
+  | 'policy_lookup'
+  | 'conversational_followup';
+
+export const QUERY_INTENT_LABELS: Record<QueryIntent, string> = {
+  fact_lookup: 'Fact lookup',
+  definition: 'Definition',
+  summarization: 'Summarization',
+  comparison: 'Comparison',
+  multi_hop_reasoning: 'Multi-hop reasoning',
+  numerical_query: 'Numerical query',
+  code_question: 'Code question',
+  table_lookup: 'Table lookup',
+  policy_lookup: 'Policy lookup',
+  conversational_followup: 'Conversational follow-up',
+};
+
 export interface Retrieval {
   id: string;
   vector_index_id: string;
@@ -31,6 +56,12 @@ export interface Retrieval {
   dense_weight: number | null;
   sparse_weight: number | null;
   rrf_k: number | null;
+  query_understanding_enabled: boolean;
+  query_intent: QueryIntent | null;
+  intent_confidence: number | null;
+  rewritten_query_text: string | null;
+  generated_queries: string[] | null;
+  detected_metadata_filter: Record<string, string> | null;
   status: RetrievalStatus;
   status_message: string | null;
   result_count: number;
@@ -65,4 +96,5 @@ export interface CreateRetrievalRequest {
   dense_weight?: number;
   sparse_weight?: number;
   rrf_k?: number;
+  query_understanding_enabled?: boolean;
 }

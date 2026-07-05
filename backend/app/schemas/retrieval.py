@@ -3,7 +3,13 @@ from datetime import datetime
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from app.models.retrieval import FusionMethod, RetrievalMode, RetrievalStatus, SimilarityMetric
+from app.models.retrieval import (
+    FusionMethod,
+    QueryIntent,
+    RetrievalMode,
+    RetrievalStatus,
+    SimilarityMetric,
+)
 
 _DEFAULT_DENSE_WEIGHT = 0.7
 _DEFAULT_SPARSE_WEIGHT = 0.3
@@ -26,6 +32,12 @@ class RetrievalRead(BaseModel):
     dense_weight: float | None
     sparse_weight: float | None
     rrf_k: int | None
+    query_understanding_enabled: bool
+    query_intent: QueryIntent | None
+    intent_confidence: float | None
+    rewritten_query_text: str | None
+    generated_queries: list[str] | None
+    detected_metadata_filter: dict | None
     status: RetrievalStatus
     status_message: str | None
     result_count: int
@@ -62,6 +74,7 @@ class CreateRetrievalRequest(BaseModel):
     dense_weight: float | None = Field(default=None, ge=0.0)
     sparse_weight: float | None = Field(default=None, ge=0.0)
     rrf_k: int | None = Field(default=None, ge=1)
+    query_understanding_enabled: bool = False
 
     @model_validator(mode="after")
     def _apply_hybrid_defaults(self) -> "CreateRetrievalRequest":

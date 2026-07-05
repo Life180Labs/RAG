@@ -27,6 +27,24 @@ imports backend ORM models. It does import `index_worker.providers`
 directly (not promoted to `common`, unlike the embedding providers) —
 an inconsistency inherited from how Phase 9 first wired this up, kept
 as-is here rather than refactored mid-phase.
+
+Phase 11 (query understanding, docs/02-architecture.md sections 51-55)
+adds an opt-in preprocessing pass (`Retrieval.query_understanding_enabled`,
+default False — unset behaves exactly as Phases 9-10 did). When
+enabled: the query is classified, rewritten, and expanded into
+`query_variants` (`[rewritten_query_text]` alone when the LLM path
+isn't configured/fails — see `query_understanding.expander`), and a
+metadata filter is auto-extracted and merged under the caller-supplied
+`metadata_filter` (caller wins on key conflicts, since an explicit
+filter should never be silently overridden by a guess).
+`query_variants` then fans out both the dense embed+search call and,
+for hybrid mode, the BM25 search — each chunk's *best* score across
+variants is kept (a max-score merge, not a second fusion pass; fusing
+across query variants is a different concern from Phase 10's
+dense/sparse fusion and deliberately kept simple). With
+`query_understanding_enabled=False`, `query_variants` is a single-item
+list containing the original query text, so the loop runs exactly
+once and produces identical results to pre-Phase-11 behavior.
 """
 
 import json
@@ -43,6 +61,7 @@ from common.logging import get_logger
 from index_worker.providers.base import UnsupportedMetricError
 from index_worker.providers.factory import get_provider as get_index_provider
 from retrieval_worker import bm25, fusion
+from retrieval_worker.query_understanding import classifier, expander, filter_extractor, rewriter
 
 logger = get_logger(__name__)
 
@@ -97,7 +116,8 @@ def execute_retrieval(retrieval_id: str) -> dict:
             text(
                 "SELECT r.query_text, r.top_k, r.score_threshold, r.similarity_metric, "
                 "r.metadata_filter, r.retrieval_mode, r.fusion_method, r.dense_weight, "
-                "r.sparse_weight, r.rrf_k, vi.document_id, vi.provider AS index_provider, "
+                "r.sparse_weight, r.rrf_k, r.query_understanding_enabled, "
+                "vi.document_id, vi.provider AS index_provider, "
                 "vi.namespace, ev.provider AS embed_provider, ev.model, ev.chunk_set_id "
                 "FROM retrievals r "
                 "JOIN vector_indexes vi ON vi.id = r.vector_index_id "
@@ -118,10 +138,30 @@ def execute_retrieval(retrieval_id: str) -> dict:
         # already-truncated top_k (docs/02-architecture.md section 60).
         pool_size = max(row.top_k * 3, 20) if is_hybrid else row.top_k
 
+        query_intent = None
+        intent_confidence = None
+        rewritten_query_text = None
+        generated_queries = None
+        detected_metadata_filter = None
+        query_variants = [row.query_text]
+
+        if row.query_understanding_enabled:
+            intent, confidence = classifier.classify(row.query_text)
+            query_intent = intent.name
+            intent_confidence = confidence
+            rewritten_query_text = rewriter.rewrite(row.query_text)
+            generated_queries = expander.expand(rewritten_query_text)
+            query_variants = generated_queries
+            detected_metadata_filter = filter_extractor.extract(row.query_text) or None
+            if detected_metadata_filter:
+                # Caller-supplied filter wins on key conflicts — an
+                # explicit filter should never be silently overridden
+                # by a heuristic guess.
+                metadata_filter = {**detected_metadata_filter, **(metadata_filter or {})}
+
         start = time.perf_counter()
         try:
             embedder = get_embedding_provider(row.embed_provider, row.model)
-            query_vector = embedder.embed([row.query_text])[0].vector
         except Exception as exc:
             message = f"Query embedding failed: {exc}"[:500]
             _fail(session, retrieval_id, message)
@@ -129,29 +169,51 @@ def execute_retrieval(retrieval_id: str) -> dict:
 
         try:
             index_provider = get_index_provider(row.index_provider, session)
-            dense_hits = index_provider.search(
-                row.namespace, query_vector, pool_size, metric,
-                None if is_hybrid else row.score_threshold,
-                metadata_filter,
-            )
-        except UnsupportedMetricError as exc:
-            message = str(exc)
-            _fail(session, retrieval_id, message)
-            logger.warning(
-                "execute_retrieval_unsupported_metric", retrieval_id=retrieval_id, error=message
-            )
-            return {"status": "failed", "reason": message}
         except Exception as exc:
             message = f"Search failed: {exc}"[:500]
             _fail(session, retrieval_id, message)
             raise
 
+        dense_scores: dict[str, float] = {}
+        for variant in query_variants:
+            try:
+                query_vector = embedder.embed([variant])[0].vector
+            except Exception as exc:
+                message = f"Query embedding failed: {exc}"[:500]
+                _fail(session, retrieval_id, message)
+                raise
+
+            try:
+                hits = index_provider.search(
+                    row.namespace, query_vector, pool_size, metric,
+                    None if is_hybrid else row.score_threshold,
+                    metadata_filter,
+                )
+            except UnsupportedMetricError as exc:
+                message = str(exc)
+                _fail(session, retrieval_id, message)
+                logger.warning(
+                    "execute_retrieval_unsupported_metric",
+                    retrieval_id=retrieval_id,
+                    error=message,
+                )
+                return {"status": "failed", "reason": message}
+            except Exception as exc:
+                message = f"Search failed: {exc}"[:500]
+                _fail(session, retrieval_id, message)
+                raise
+
+            for hit in hits:
+                if hit.chunk_id not in dense_scores or hit.score > dense_scores[hit.chunk_id]:
+                    dense_scores[hit.chunk_id] = hit.score
+
         if is_hybrid:
             chunks = _fetch_chunk_texts(session, row.chunk_set_id, metadata_filter)
-            sparse_hits = bm25.search(chunks, row.query_text, pool_size)
-
-            dense_scores = {hit.chunk_id: hit.score for hit in dense_hits}
-            sparse_scores = {hit.chunk_id: hit.score for hit in sparse_hits}
+            sparse_scores: dict[str, float] = {}
+            for variant in query_variants:
+                for hit in bm25.search(chunks, variant, pool_size):
+                    if hit.chunk_id not in sparse_scores or hit.score > sparse_scores[hit.chunk_id]:
+                        sparse_scores[hit.chunk_id] = hit.score
 
             if row.fusion_method == "RRF":
                 fused = fusion.reciprocal_rank_fusion(
@@ -179,14 +241,10 @@ def execute_retrieval(retrieval_id: str) -> dict:
                 for hit in fused
             ]
         else:
+            ranked = sorted(dense_scores.items(), key=lambda kv: kv[1], reverse=True)[: row.top_k]
             results = [
-                {
-                    "chunk_id": hit.chunk_id,
-                    "score": hit.score,
-                    "dense_score": None,
-                    "sparse_score": None,
-                }
-                for hit in dense_hits
+                {"chunk_id": chunk_id, "score": score, "dense_score": None, "sparse_score": None}
+                for chunk_id, score in ranked
             ]
         latency_ms = int((time.perf_counter() - start) * 1000)
 
@@ -221,7 +279,12 @@ def execute_retrieval(retrieval_id: str) -> dict:
             text(
                 "UPDATE retrievals SET status = 'COMPLETED', status_message = NULL, "
                 "result_count = :count, avg_similarity = :avg, min_similarity = :min, "
-                "max_similarity = :max, latency_ms = :latency, updated_at = :now "
+                "max_similarity = :max, latency_ms = :latency, "
+                "query_intent = :query_intent, intent_confidence = :intent_confidence, "
+                "rewritten_query_text = :rewritten_query_text, "
+                "generated_queries = :generated_queries, "
+                "detected_metadata_filter = :detected_metadata_filter, "
+                "updated_at = :now "
                 "WHERE id = :id"
             ),
             {
@@ -230,6 +293,13 @@ def execute_retrieval(retrieval_id: str) -> dict:
                 "min": min_similarity,
                 "max": max_similarity,
                 "latency": latency_ms,
+                "query_intent": query_intent,
+                "intent_confidence": intent_confidence,
+                "rewritten_query_text": rewritten_query_text,
+                "generated_queries": json.dumps(generated_queries) if generated_queries else None,
+                "detected_metadata_filter": (
+                    json.dumps(detected_metadata_filter) if detected_metadata_filter else None
+                ),
                 "now": datetime.now(UTC),
                 "id": retrieval_id,
             },

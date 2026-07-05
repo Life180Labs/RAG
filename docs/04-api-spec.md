@@ -365,7 +365,7 @@ VIEWER+.
 
 | Method | Path | Auth | Notes |
 |--------|------|----------|---------|
-| POST   | `/api/v1/documents/{document_id}/vector-indexes/{vector_index_id}/retrievals` | Document VIEWER | Run a retrieval query; body `{"query_text": "...", "top_k": 10, "score_threshold": null, "similarity_metric": "cosine", "metadata_filter": null, "retrieval_mode": "dense", "fusion_method": null, "dense_weight": null, "sparse_weight": null, "rrf_k": null}` (only `query_text` required) |
+| POST   | `/api/v1/documents/{document_id}/vector-indexes/{vector_index_id}/retrievals` | Document VIEWER | Run a retrieval query; body `{"query_text": "...", "top_k": 10, "score_threshold": null, "similarity_metric": "cosine", "metadata_filter": null, "retrieval_mode": "dense", "fusion_method": null, "dense_weight": null, "sparse_weight": null, "rrf_k": null, "query_understanding_enabled": false}` (only `query_text` required) |
 | GET    | `/api/v1/documents/{document_id}/vector-indexes/{vector_index_id}/retrievals` | Document VIEWER | List past retrievals against this index, most recent first; `?limit=50&offset=0` |
 | GET    | `/api/v1/documents/{document_id}/vector-indexes/{vector_index_id}/retrievals/{retrieval_id}` | Document VIEWER | Get one retrieval's status and aggregate stats |
 | GET    | `/api/v1/documents/{document_id}/vector-indexes/{vector_index_id}/retrievals/{retrieval_id}/results` | Document VIEWER | Get the ranked candidate list (chunk text, heading, page, rank, score) |
@@ -403,6 +403,16 @@ The results response gains `dense_score`/`sparse_score` alongside the existing (
 hybrid) `score` — either can be `null` for a given chunk (a chunk with no BM25 term overlap has no
 `sparse_score`; see docs/03-database.md section 19 for the small-corpus BM25 caveat). Dense-only
 retrievals leave every hybrid-specific field `null`, exactly as before Phase 10.
+
+**Query understanding (Phase 11)**: `query_understanding_enabled` (default `false`) opts a
+retrieval into pre-search classification, rewrite, multi-query expansion, and metadata filter
+extraction — see docs/03-database.md section 19 for the full pipeline description. The
+`Retrieval` response gains `query_intent`, `intent_confidence`, `rewritten_query_text`,
+`generated_queries` (`list[str]`), and `detected_metadata_filter` — all `null` when
+`query_understanding_enabled` is `false`, and only populated once the retrieval reaches
+`status: "completed"` (they're computed by the worker, same as every other analysis field on this
+resource). `detected_metadata_filter` is merged under any caller-supplied `metadata_filter` before
+search — the caller's explicit filter always wins on a key conflict.
 
 # 16. Reranking APIs
 

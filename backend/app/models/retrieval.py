@@ -26,12 +26,25 @@ similarity. `Retrieval.score_threshold`/`top_k` continue to mean "on
 the final score" — the fused score for hybrid, the dense similarity for
 dense-only — so the "Threshold"/"Top-K" configuration in Phase 9's spec
 needs no separate hybrid-only field.
+
+Phase 11 (query understanding, docs/02-architecture.md sections 51-55)
+extends this same model again, opt-in via `query_understanding_enabled`
+(default False — existing dense/hybrid behavior is unchanged when
+unset). When enabled, `retrieval_worker.query_understanding` classifies
+the query's `QueryIntent`, rewrites it, generates paraphrase variants,
+and extracts a metadata filter — all persisted here for the frontend's
+Query Inspector/Rewrite Viewer/Generated Queries panels.
+`detected_metadata_filter` is kept separate from the caller-supplied
+`metadata_filter` (Phase 9) because they have different provenance and
+different precedence when merged (caller-supplied wins on key
+conflicts) — collapsing them into one column would lose which one a
+value came from.
 """
 
 import enum
 import uuid
 
-from sqlalchemy import Enum, Float, ForeignKey, Integer, String
+from sqlalchemy import Boolean, Enum, Float, ForeignKey, Integer, String
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -42,6 +55,19 @@ class RetrievalStatus(str, enum.Enum):
     PENDING = "pending"
     COMPLETED = "completed"
     FAILED = "failed"
+
+
+class QueryIntent(str, enum.Enum):
+    FACT_LOOKUP = "fact_lookup"
+    DEFINITION = "definition"
+    SUMMARIZATION = "summarization"
+    COMPARISON = "comparison"
+    MULTI_HOP_REASONING = "multi_hop_reasoning"
+    NUMERICAL_QUERY = "numerical_query"
+    CODE_QUESTION = "code_question"
+    TABLE_LOOKUP = "table_lookup"
+    POLICY_LOOKUP = "policy_lookup"
+    CONVERSATIONAL_FOLLOWUP = "conversational_followup"
 
 
 class SimilarityMetric(str, enum.Enum):
@@ -95,6 +121,16 @@ class Retrieval(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     dense_weight: Mapped[float | None] = mapped_column(Float, nullable=True)
     sparse_weight: Mapped[float | None] = mapped_column(Float, nullable=True)
     rrf_k: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    query_understanding_enabled: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False
+    )
+    query_intent: Mapped[QueryIntent | None] = mapped_column(
+        Enum(QueryIntent, name="query_intent"), nullable=True
+    )
+    intent_confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
+    rewritten_query_text: Mapped[str | None] = mapped_column(String(2000), nullable=True)
+    generated_queries: Mapped[list[str] | None] = mapped_column(JSONB, nullable=True)
+    detected_metadata_filter: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
     status: Mapped[RetrievalStatus] = mapped_column(
         Enum(RetrievalStatus, name="retrieval_status"),
         nullable=False,

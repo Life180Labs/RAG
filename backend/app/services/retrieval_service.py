@@ -67,6 +67,7 @@ class RetrievalService:
                 dense_weight=payload.dense_weight,
                 sparse_weight=payload.sparse_weight,
                 rrf_k=payload.rrf_k,
+                query_understanding_enabled=payload.query_understanding_enabled,
                 status=RetrievalStatus.PENDING,
                 created_by=actor_id,
             )

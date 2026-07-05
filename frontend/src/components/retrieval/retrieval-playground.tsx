@@ -15,6 +15,7 @@ import {
 import { ApiRequestError } from '@/services/api-client';
 import {
   FUSION_METHODS,
+  QUERY_INTENT_LABELS,
   SIMILARITY_METRICS,
   type FusionMethod,
   type RetrievalMode,
@@ -42,6 +43,7 @@ export function RetrievalPlayground({
   const [fusionMethod, setFusionMethod] = useState<FusionMethod>('weighted_sum');
   const [denseWeight, setDenseWeight] = useState(0.7);
   const [rrfK, setRrfK] = useState(60);
+  const [queryUnderstandingEnabled, setQueryUnderstandingEnabled] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [activeRetrievalId, setActiveRetrievalId] = useState<string | null>(null);
   const [showInspector, setShowInspector] = useState(false);
@@ -65,6 +67,7 @@ export function RetrievalPlayground({
         top_k: topK,
         similarity_metric: metric,
         retrieval_mode: mode,
+        query_understanding_enabled: queryUnderstandingEnabled,
         ...(mode === 'hybrid'
           ? {
               fusion_method: fusionMethod,
@@ -125,6 +128,17 @@ export function RetrievalPlayground({
           {createRetrieval.isPending ? 'Searching…' : 'Search'}
         </Button>
       </div>
+
+      <label className="flex items-center gap-2 text-xs" data-testid="query-understanding-toggle">
+        <input
+          type="checkbox"
+          checked={queryUnderstandingEnabled}
+          onChange={(event) => setQueryUnderstandingEnabled(event.target.checked)}
+        />
+        <span className="text-muted-foreground">
+          Query understanding (classify, rewrite, expand, extract filters)
+        </span>
+      </label>
 
       <div className="flex flex-wrap items-center gap-2" data-testid="hybrid-search-dashboard">
         <div className="flex items-center gap-1 text-sm">
@@ -221,6 +235,51 @@ export function RetrievalPlayground({
           )}
           {activeRetrieval.status === 'failed' && activeRetrieval.status_message && (
             <span className="text-destructive text-xs">{activeRetrieval.status_message}</span>
+          )}
+        </div>
+      )}
+
+      {activeRetrieval?.query_understanding_enabled && activeRetrieval.status === 'completed' && (
+        <div
+          className="border-border space-y-1 rounded-lg border p-2 text-xs"
+          data-testid="query-inspector"
+        >
+          {activeRetrieval.query_intent && (
+            <div className="flex items-center gap-2" data-testid="query-inspector-intent">
+              <span className="text-muted-foreground">Intent</span>
+              <Badge variant="secondary">{QUERY_INTENT_LABELS[activeRetrieval.query_intent]}</Badge>
+              {activeRetrieval.intent_confidence !== null && (
+                <span className="text-muted-foreground">
+                  {(activeRetrieval.intent_confidence * 100).toFixed(0)}% confidence
+                </span>
+              )}
+            </div>
+          )}
+          {activeRetrieval.rewritten_query_text && (
+            <div data-testid="query-inspector-rewrite">
+              <span className="text-muted-foreground">Rewritten </span>
+              {activeRetrieval.rewritten_query_text}
+            </div>
+          )}
+          {activeRetrieval.generated_queries && activeRetrieval.generated_queries.length > 1 && (
+            <div data-testid="query-inspector-generated-queries">
+              <span className="text-muted-foreground">Generated queries</span>
+              <ul className="list-disc pl-4">
+                {activeRetrieval.generated_queries.map((generated) => (
+                  <li key={generated}>{generated}</li>
+                ))}
+              </ul>
+            </div>
+          )}
+          {activeRetrieval.detected_metadata_filter && (
+            <div className="flex flex-wrap items-center gap-1" data-testid="query-inspector-filter">
+              <span className="text-muted-foreground">Detected filter</span>
+              {Object.entries(activeRetrieval.detected_metadata_filter).map(([key, value]) => (
+                <Badge key={key} variant="secondary">
+                  {key}={value}
+                </Badge>
+              ))}
+            </div>
           )}
         </div>
       )}

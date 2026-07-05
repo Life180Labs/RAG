@@ -699,10 +699,13 @@ vectors in an external store, so the worker must reach that store first.
 # 19. Retrieval Schema
 
 Implemented in `backend/app/models/retrieval.py`, migrations `0010_add_retrieval_tables` (Phase 9,
-dense retrieval) and `0011_add_hybrid_retrieval` (Phase 10, hybrid search — adds the
+dense retrieval), `0011_add_hybrid_retrieval` (Phase 10, hybrid search — adds the
 `retrieval_mode`/`fusion_method`/`dense_weight`/`sparse_weight`/`rrf_k` columns on `retrievals` and
 `dense_score`/`sparse_score` on `retrieval_results`, all nullable so Phase 9's dense-only rows are
-unaffected).
+unaffected), and `0012_query_understanding` (Phase 11, query understanding — adds
+`query_understanding_enabled`/`query_intent`/`intent_confidence`/`rewritten_query_text`/
+`generated_queries`/`detected_metadata_filter` to `retrievals`, opt-in via
+`query_understanding_enabled` defaulting to `false` so Phase 9/10 behavior is unchanged when unset).
 
 ```
 retrievals
@@ -719,6 +722,15 @@ retrievals
   dense_weight         float, nullable                     -- only set for hybrid + weighted_sum
   sparse_weight        float, nullable                     -- only set for hybrid + weighted_sum
   rrf_k                integer, nullable                   -- only set for hybrid + rrf
+  query_understanding_enabled  boolean, default false       -- opt-in (Phase 11)
+  query_intent         enum(fact_lookup, definition, summarization, comparison,
+                            multi_hop_reasoning, numerical_query, code_question,
+                            table_lookup, policy_lookup, conversational_followup), nullable
+  intent_confidence    float, nullable
+  rewritten_query_text varchar(2000), nullable
+  generated_queries    jsonb, nullable                      -- list[str], includes rewritten original
+  detected_metadata_filter  jsonb, nullable                 -- auto-extracted, merged under caller's
+                                                             -- metadata_filter (caller wins on conflict)
   status               enum(pending, completed, failed)
   status_message       varchar(500), nullable
   result_count         integer, default 0
@@ -799,6 +811,38 @@ threshold") means the same thing for every metric.
 attaches at index build time (`heading`, `page`, `language`) — not an arbitrary key/value filter —
 applied natively per provider (a join back to `chunks` for PgVector, since that's the original
 source of that data; each provider's own upserted payload for Qdrant/Chroma/Pinecone).
+
+**Phase 11 (query understanding, docs/02-architecture.md sections 51-55) is an opt-in
+preprocessing pass**, not a parallel pipeline — `query_understanding_enabled` defaults to `false`,
+leaving Phase 9/10 behavior untouched when unset. When enabled, `retrieval_worker.execute_retrieval`
+runs four steps before search:
+
+- **Classification** (`query_understanding.classifier`): rule-based (regex/keyword over the fixed
+  10-way taxonomy architecture section 51 specifies), not a trained model — deterministic and fully
+  testable without any external dependency, the same scoping choice Phase 10 made for BM25.
+  Persisted as `query_intent`/`intent_confidence` for the frontend's Query Inspector; does not
+  change retrieval behavior itself (no automatic mode-switching to the doc's illustrative "Hybrid +
+  Metadata Filter" preferred-retriever example — that would be a bigger behavior change than this
+  phase's scope covers).
+- **Rewrite** (`query_understanding.rewriter`): architecture section 53's own example rewrites using
+  prior *conversation context*, which this system has no model for yet (Conversation Memory is
+  section 95, a separate future architecture concern with no backing table today) — so Phase 11's
+  rewrite operates on the single query in isolation via an LLM call (OpenAI, gated by the same
+  `OPENAI_API_KEY` Phase 7's cloud embedding provider already uses), falling back to whitespace/
+  punctuation normalization (no rewrite) when the key isn't configured or the call fails. A query
+  understanding failure must never block retrieval.
+- **Multi-query expansion** (`query_understanding.expander`): generates up to 3 alternative
+  phrasings via one LLM call (same fallback: `[query_text]` alone without a key). `generated_queries`
+  fans out both the dense embed+search call and, for hybrid mode, BM25 search — each chunk's best
+  score across variants is kept (a max-score merge across query variants, a different concern from
+  Phase 10's dense/sparse fusion and deliberately kept simpler).
+- **Filter extraction** (`query_understanding.filter_extractor`): regex-based, extracting only
+  `heading`/`page`/`language` — the three keys `metadata_filter` above actually supports. Section
+  55's own example (department/year filters) isn't extracted because chunk metadata has no
+  department or publication-year column; building detection for a filter nothing downstream can
+  apply would be dead code, not a real feature. `detected_metadata_filter` is merged under the
+  caller-supplied `metadata_filter` — caller wins on key conflicts, since an explicit filter should
+  never be silently overridden by a heuristic guess.
 
 # 20. Prompt Schema
 

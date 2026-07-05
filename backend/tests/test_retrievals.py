@@ -351,3 +351,41 @@ async def test_create_dense_retrieval_leaves_hybrid_fields_null(client):
     assert body["dense_weight"] is None
     assert body["sparse_weight"] is None
     assert body["rrf_k"] is None
+
+
+@pytest.mark.asyncio
+async def test_create_retrieval_defaults_query_understanding_disabled(client):
+    token = await _register_and_login(client, "owner@example.com")
+    document_id, vector_index_id = await _seed_index_chain(client, token)
+
+    response = await client.post(
+        f"/api/v1/documents/{document_id}/vector-indexes/{vector_index_id}/retrievals",
+        json={"query_text": "test"},
+        headers=_auth(token),
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()["data"]
+    assert body["query_understanding_enabled"] is False
+    assert body["query_intent"] is None
+    assert body["intent_confidence"] is None
+    assert body["rewritten_query_text"] is None
+    assert body["generated_queries"] is None
+    assert body["detected_metadata_filter"] is None
+
+
+@pytest.mark.asyncio
+async def test_create_retrieval_accepts_query_understanding_enabled(client):
+    token = await _register_and_login(client, "owner@example.com")
+    document_id, vector_index_id = await _seed_index_chain(client, token)
+
+    response = await client.post(
+        f"/api/v1/documents/{document_id}/vector-indexes/{vector_index_id}/retrievals",
+        json={"query_text": "what is the leave policy?", "query_understanding_enabled": True},
+        headers=_auth(token),
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()["data"]
+    assert body["query_understanding_enabled"] is True
+    # Analysis fields only populate once the worker runs (status=pending here).
+    assert body["status"] == "pending"
+    assert body["query_intent"] is None
