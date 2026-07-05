@@ -15,6 +15,7 @@ from app.models import (  # noqa: F401
     document_content,
     embedding,
     invitation,
+    llm_request,
     organization,
     project,
     prompt,

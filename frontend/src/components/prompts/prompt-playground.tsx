@@ -2,6 +2,7 @@
 
 import { useMemo, useState } from 'react';
 
+import { LLMCompletionPanel } from '@/components/llm/llm-completion-panel';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -296,6 +297,15 @@ export function PromptPlayground({
             </ul>
           )}
         </div>
+      )}
+
+      {latestPrompt && latestPrompt.status === 'completed' && (
+        <LLMCompletionPanel
+          documentId={documentId}
+          vectorIndexId={vectorIndexId}
+          retrievalId={retrievalId}
+          promptId={latestPrompt.id}
+        />
       )}
 
       {latestByName.length > 0 && (

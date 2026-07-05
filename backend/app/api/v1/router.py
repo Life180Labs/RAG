@@ -11,6 +11,7 @@ from app.api.v1 import (
     embeddings,
     health,
     invitations,
+    llm,
     organizations,
     projects,
     prompts,
@@ -35,4 +36,5 @@ api_router.include_router(embeddings.router)
 api_router.include_router(vector_indexes.router)
 api_router.include_router(retrievals.router)
 api_router.include_router(prompts.router)
+api_router.include_router(llm.router)
 api_router.include_router(invitations.router)

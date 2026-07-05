@@ -979,6 +979,36 @@ caller already fetched, unlike embedding generation or reranking. `failed` is re
 exceed `model_context_window`, leaving no room for retrieved context regardless of chunk sizes —
 a real, surfaced failure rather than a silently context-free prompt.
 
+# LLM Request Schema (no dedicated section number in the original TOC)
+
+Phase 15 (LLM Gateway, docs/02-architecture.md sections 82-90) adds migration
+`0016_add_llm_requests` — one table, `llm_requests` — the original TOC didn't reserve a numbered
+section for it, the same situation Organization/Invitation's schema section above already
+documents; this is that same convention applied again.
+
+`LLMRequest` is always tied to a `prompt_id` (Phase 14's `Prompt`, `ON DELETE CASCADE`) rather than
+being a general-purpose, tenant-independent "chat" resource — this gateway's actual job in this
+app is "send an already-built, already-citation-grounded Prompt to an LLM and get an answer," so
+every completion has a natural RBAC anchor through the same document/vector-index/retrieval/prompt
+chain every Phase 9-14 resource already uses. `provider`/`model` are plain strings (not a Postgres
+enum), the same rationale as `Chunk.strategy`/`Embedding.provider`: new providers are expected over
+time and a varchar avoids an `ALTER TYPE` migration for each addition.
+
+`attempted_providers` (JSONB) is the Retry & Fallback trail (architecture section 86) — one
+`{provider, model, error}` entry per provider the gateway actually tried, in order, `error: null`
+marking the one that succeeded — so a completion that only succeeded on the third provider in the
+fallback chain stays fully auditable instead of looking identical to one that succeeded on the
+first try. `cost_usd`/`latency_ms` are first-class columns (this codebase's convention for
+anything the frontend charts directly, e.g. `retrievals.avg_similarity`), computed from
+`registry.py`'s static per-1M-token pricing table and wall-clock timing respectively — real numbers
+for a real (possibly free, for the self-hosted `ollama` provider) call, not placeholders.
+
+`status` mirrors `Prompt.status`'s shape (`pending`/`completed`/`failed`), but like prompt
+building, generation happens synchronously within the request for the non-streaming endpoint — no
+Celery task — since the gateway itself already handles retry/backoff/fallback internally; a
+`failed` row means every provider in the fallback chain failed, with the reason for each recorded
+in `attempted_providers`, not a silent 500.
+
 # 21. Conversation Schema
 
 **Pending — Conversation Memory phase.**

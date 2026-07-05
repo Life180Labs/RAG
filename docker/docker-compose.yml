@@ -103,6 +103,15 @@ services:
       MINIO_BUCKET: ${MINIO_BUCKET:-rag-documents}
       JWT_SECRET_KEY: ${JWT_SECRET_KEY:-change-me-in-production}
       CORS_ORIGINS: '["http://localhost:${FRONTEND_PORT:-3000}"]'
+      # Phase 15 LLM Gateway's Ollama provider is self-hosted, not key-gated;
+      # `localhost` inside this container is the container itself, not the
+      # host machine, so a real Ollama server running on the host (as one
+      # does in this dev environment) needs the Docker-provided hostname
+      # instead. `extra_hosts` below makes this resolve on Linux hosts too
+      # (Docker Desktop on Windows/Mac already provides it automatically).
+      OLLAMA_BASE_URL: http://host.docker.internal:11434
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes:
       - ../backend/app:/app/app
     depends_on:

@@ -55,6 +55,20 @@ class Settings(BaseSettings):
     access_token_expire_minutes: int = 15
     refresh_token_expire_days: int = 7
 
+    # LLM Gateway (Phase 15) — cloud providers are optional; unset ones are
+    # real integrations that simply aren't reachable in this environment,
+    # the same "gated by an unset key" convention Phase 7/13's cloud
+    # embedding/reranking providers already established.
+    openai_api_key: str | None = None
+    anthropic_api_key: str | None = None
+    gemini_api_key: str | None = None
+    groq_api_key: str | None = None
+    openrouter_api_key: str | None = None
+    # Ollama is self-hosted, not key-gated — it's a real integration that's
+    # simply unreachable when no Ollama server runs at this address, the
+    # same shape of gap as an unset cloud API key.
+    ollama_base_url: str = "http://localhost:11434"
+
 
 @lru_cache
 def get_settings() -> Settings:

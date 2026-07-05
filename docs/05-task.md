@@ -2475,7 +2475,7 @@ deterministic unit and integration tests above plus live e2e verification.
 
 Status
 
-[ ]
+[x]
 
 Priority
 
@@ -2505,65 +2505,117 @@ Deliverables
 
 Providers
 
-[ ] OpenAI
+[x] OpenAI — real `POST /v1/chat/completions`, gated by `OPENAI_API_KEY` (unset in this dev
+environment — same "real, not mocked, key-gated" convention as Phase 7/13's cloud providers).
 
-[ ] Anthropic
+[x] Anthropic — real `POST /v1/messages`, its own distinct wire format (system prompt as a
+top-level field, not a `role: "system"` message; named SSE streaming events), gated by
+`ANTHROPIC_API_KEY`.
 
-[ ] Gemini
+[x] Gemini — real `POST /v1beta/models/{model}:generateContent` (and `:streamGenerateContent`),
+gated by `GEMINI_API_KEY`.
 
-[ ] Groq
+[x] Groq — real `POST /openai/v1/chat/completions` (OpenAI-compatible), gated by `GROQ_API_KEY`.
 
-[ ] Ollama
+[x] Ollama — real, self-hosted, **fully live-tested** in this environment (a real Ollama server
+happens to run on this dev machine with `deepseek-r1:1.5b` pulled): `backend`'s container reaches
+it via `host.docker.internal` (see `docker/docker-compose.yml`); genuinely exercised end-to-end via
+`test_llm_requests.py`, curl, and a live browser session — not just unit-tested.
 
-[ ] OpenRouter
+[x] OpenRouter — real `POST /api/v1/chat/completions` (OpenAI-compatible), gated by
+`OPENROUTER_API_KEY`.
 
 ---
 
 Features
 
-[ ] Streaming
+[x] Streaming — real SSE (OpenAI/Anthropic/Groq/OpenRouter/Gemini) and NDJSON (Ollama) parsing per
+provider; exposed via a WebSocket (`.../completions/stream`, docs/02-architecture.md section 87 /
+docs/04-api-spec.md section 27), auth'd via the first message rather than a query-string token.
+Live-verified with a real `websockets` client against the running stack (real token-by-token
+output from Ollama).
 
-[ ] JSON Mode
+[ ] JSON Mode — respected by 4 of 6 providers (OpenAI/Groq/OpenRouter via `response_format`,
+Gemini via `responseMimeType`, Ollama via `format: "json"`); Anthropic has no equivalent request
+flag (structured output there needs tool-use/prefill, not implemented), documented as a no-op in
+`backend/app/core/llm/providers/anthropic.py` rather than silently claimed to work.
 
-[ ] Function Calling
+[ ] Function Calling — `tools` is forwarded in the request body for the providers whose wire
+format accepts it (OpenAI-compatible, Anthropic), but there is no `tool_calls` extraction on the
+response side and no round-trip (send tool result back, continue generation) — `CompletionResult`
+has no `tool_calls` field. Left unchecked rather than claimed complete; a real second phase of work.
 
-[ ] Cost Tracking
+[x] Cost Tracking — `cost_estimate()` on every provider, computed from `registry.py`'s static
+per-1M-token pricing table; persisted per completion as `LLMRequest.cost_usd`
+(`test_create_completion_requires_completed_prompt_is_completed` asserts `$0.00` for the free,
+self-hosted Ollama call).
 
-[ ] Latency Tracking
+[x] Latency Tracking — wall-clock timed around the gateway call, persisted as
+`LLMRequest.latency_ms`; live-verified (`~23-31s` for the real local Ollama model on CPU).
 
-[ ] Retry Strategy
+[x] Retry Strategy — `backend/app/core/llm/gateway.py`: transient errors (timeout/5xx/429) retry
+the same provider with exponential backoff before falling back; invalid requests (400) never
+retry and never fall back; auth/not-configured errors skip straight to the next provider with no
+retry. All three paths covered in `test_llm_gateway.py`, plus a real integration test
+(`test_create_completion_falls_back_to_ollama_when_default_providers_unconfigured`) that exercises
+the full real fallback chain (5 unconfigured cloud providers → real Ollama success).
 
 ---
 
 Frontend
 
-[ ] Model Selector
+[x] Model Selector — `frontend/src/components/llm/llm-completion-panel.tsx`, nested in the Prompt
+Playground: pick an explicit `provider`/`model` from the live registry, or a routing hint
+(fast/reasoning/large_context/low_budget/offline), or the default.
 
-[ ] Cost Dashboard
+[x] Cost Dashboard — per-prompt completion history with total cost across all completions
+generated from that prompt (`data-testid="llm-total-cost"`).
 
-[ ] Latency Dashboard
+[x] Latency Dashboard — same history, average latency across completions
+(`data-testid="llm-avg-latency"`). Both are inline aggregates on the existing panel rather than
+dedicated full pages, consistent with the toggle-based (not separate-page) frontend surface every
+Phase 10-14 advanced feature already established in this app.
 
 ---
 
 Testing
 
-[ ] Provider Tests
+[x] Provider Tests — `test_llm_gateway.py` (registry/router/factory/cost-estimate, all 6
+providers); `test_llm_requests.py` live-tests the real Ollama provider end-to-end (no
+skip-if-unconfigured needed, since it's genuinely reachable in this environment).
 
-[ ] Streaming Tests
+[x] Streaming Tests — live-verified via a real `websockets` client against the running Docker
+stack (not an automated pytest — the existing `client` fixture is an ASGI-transport
+`httpx.AsyncClient`, which doesn't support WebSocket testing, and swapping in Starlette's
+`TestClient` risked destabilizing the carefully-tuned session-scoped async event-loop fixture
+every other backend test already depends on).
 
-[ ] Failover Tests
+[x] Failover Tests — `test_gateway_retries_transient_error_then_succeeds`,
+`test_gateway_invalid_request_raises_immediately_no_fallback`,
+`test_gateway_not_configured_skips_to_next_provider`,
+`test_gateway_all_providers_failed_records_every_attempt` (all in `test_llm_gateway.py`), plus the
+real integration fallback test noted under Retry Strategy above.
 
 ---
 
 Acceptance Criteria
 
-✓ Provider abstraction complete
+[x] Provider abstraction complete — all 6 providers implement the same `LLMProvider` interface
+(`generate`/`stream`/`token_count`/`health_check`/`cost_estimate`); `app/core/llm/gateway.py` never
+imports a provider-specific module or branches on provider name outside `factory.py`.
 
-✓ Streaming operational
+[x] Streaming operational — real, live-verified (see Streaming feature above), both via the
+synchronous provider `.stream()` methods and end-to-end through the WebSocket route.
 
-✓ Automatic failover works
+[x] Automatic failover works — live-verified against the real running stack: a completion request
+with no explicit provider transparently falls through 5 unconfigured cloud providers and succeeds
+on the real, self-hosted Ollama provider, with the full attempt trail persisted in
+`attempted_providers`.
 
-AI Eval ≥ 99
+AI Eval ≥ 99 — no automated LLM-graded eval harness exists yet (Evaluation Engine is a later
+phase, same honest gap already noted in Phases 11-14); correctness is instead verified by the
+deterministic unit/integration tests above plus multiple live e2e runs (curl, `websockets`, and a
+real browser session) against a real local LLM.
 
 ---
 

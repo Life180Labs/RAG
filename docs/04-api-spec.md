@@ -487,7 +487,39 @@ VIEWER+ like creating a retrieval does, not ADMIN+):
 
 # 18. LLM APIs
 
-**Pending — LLM Gateway phase.**
+Phase 15. Two resource groups, both requiring authentication:
+
+**Registry/health** (not tenant-scoped — describes the gateway itself):
+
+- `GET /llm/models` — every registered `ModelSpec` across all six providers (OpenAI, Anthropic,
+  Gemini, Groq, OpenRouter, Ollama): context window, per-1M-token pricing, capability flags.
+- `GET /llm/models/{provider}/health` — `{provider, configured, healthy}`. `configured` reflects
+  whether an API key (or, for `ollama`, nothing — it's self-hosted) is set; `healthy` additionally
+  makes a real call to confirm the provider is actually reachable right now.
+
+**Completions** (nested under a `Prompt`, same VIEWER+ pattern as reading one — generating a
+completion from an already-built, already-citation-grounded prompt is a read-oriented action, not
+a mutation):
+
+- `POST .../retrievals/{retrieval_id}/prompts/{prompt_id}/completions` — generates and persists an
+  `LLMRequest` **synchronously**. Body: optional `provider`+`model` together (422 if only one is
+  given), or `routing_hint` (`fast`/`reasoning`/`large_context`/`low_budget`/`offline`) instead, or
+  neither for the default model. 409 `PROMPT_NOT_COMPLETED` if the prompt hasn't finished building.
+  Always returns 200 even when generation fails — a `status="failed"` row with `attempted_providers`
+  filled in, mirroring how `POST .../prompts` handles a token-budget failure (Phase 14) rather than
+  a bare 500.
+- `GET .../retrievals/{retrieval_id}/prompts/{prompt_id}/completions` — every completion generated
+  from that prompt, newest first.
+- `GET .../retrievals/{retrieval_id}/prompts/{prompt_id}/completions/{request_id}` — one completion.
+- `WS .../retrievals/{retrieval_id}/prompts/{prompt_id}/completions/stream` — token-by-token
+  streaming per docs/02-architecture.md section 87's "LLM -> Gateway -> WebSocket -> Frontend"
+  diagram and section 27 below. Browsers' native WebSocket API can't set a custom `Authorization`
+  header on the handshake, so auth happens via the first message the client sends after the socket
+  opens (`{"token": "<jwt>", "provider": ..., "model": ..., "routing_hint": ..., "json_mode": ...}`)
+  — never a `?token=` query string, which would leak the token into server/proxy access logs.
+  Server messages: `{"type": "delta", "text": ...}` per chunk, then either
+  `{"type": "done", "provider", "model", "input_tokens", "output_tokens"}` or
+  `{"type": "error", "message": ...}`.
 
 # 19. Conversation APIs
 
@@ -523,9 +555,11 @@ VIEWER+ like creating a retrieval does, not ADMIN+):
 
 # 27. WebSocket Events
 
-**Pending.** Used for upload progress, processing status, streaming LLM responses, and
-evaluation progress per docs/02-architecture.md section 138. Introduced alongside the Document
-Processing and LLM Gateway phases.
+Streaming LLM responses (Phase 15) is implemented — see section 18's `.../completions/stream`
+route. Upload progress, processing status, and evaluation progress (docs/02-architecture.md
+section 138) remain **pending**: Phases 4-6's document pipeline still uses REST polling
+(`refetchInterval` on the frontend) rather than WebSocket, a gap this phase didn't retroactively
+fix since it was out of scope for the LLM Gateway deliverable specifically.
 
 # 28. Error Codes
 
