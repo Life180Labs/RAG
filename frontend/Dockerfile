@@ -9,6 +9,14 @@ FROM node:22-slim AS builder
 WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
+# NEXT_PUBLIC_* vars are inlined into the client bundle at build time, not
+# read at container runtime — a plain `railway variable set` has no effect
+# on them for a Dockerfile-based deploy, since `docker build` doesn't see
+# runtime env vars at all. Railway passes every service variable as a
+# build ARG automatically, but only for ARGs the Dockerfile actually
+# declares, so this has to be explicit here.
+ARG NEXT_PUBLIC_API_URL
+ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL
 RUN npm run build
 
 # --- Runtime ---
