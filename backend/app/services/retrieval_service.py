@@ -35,7 +35,7 @@ class RetrievalService:
         self.vector_indexes = vector_index_repository
         self.audit_logs = audit_log_repository
 
-    async def _get_vector_index(
+    async def get_vector_index(
         self, document_id: uuid.UUID, vector_index_id: uuid.UUID
     ):
         index = await self.vector_indexes.get_by_id(vector_index_id)
@@ -51,7 +51,7 @@ class RetrievalService:
         *,
         actor_id: uuid.UUID,
     ) -> Retrieval:
-        await self._get_vector_index(document_id, vector_index_id)
+        await self.get_vector_index(document_id, vector_index_id)
 
         retrieval = await self.retrievals.add(
             Retrieval(
@@ -91,13 +91,13 @@ class RetrievalService:
     async def list_retrievals(
         self, document_id: uuid.UUID, vector_index_id: uuid.UUID, limit: int = 50, offset: int = 0
     ) -> list[Retrieval]:
-        await self._get_vector_index(document_id, vector_index_id)
+        await self.get_vector_index(document_id, vector_index_id)
         return await self.retrievals.list_by_vector_index(vector_index_id, limit, offset)
 
     async def get_retrieval(
         self, document_id: uuid.UUID, vector_index_id: uuid.UUID, retrieval_id: uuid.UUID
     ) -> Retrieval:
-        await self._get_vector_index(document_id, vector_index_id)
+        await self.get_vector_index(document_id, vector_index_id)
         retrieval = await self.retrievals.get_by_id(retrieval_id)
         if retrieval is None or retrieval.vector_index_id != vector_index_id:
             raise NotFoundError("Retrieval not found.", code="RETRIEVAL_NOT_FOUND")

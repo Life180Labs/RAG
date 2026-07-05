@@ -958,10 +958,12 @@ Token accounting (Token Budget Manager, section 76) is first-class columns rathe
 blob, matching this codebase's existing convention of dedicated columns for anything the frontend
 charts/inspects directly (e.g. `retrievals.avg_similarity`): `model_context_window`,
 `system_prompt_tokens`, `conversation_tokens`, `context_tokens`, `query_tokens`,
-`response_budget_tokens`, `total_tokens`. `conversation_tokens` is always `0` in this phase —
-persistent conversation memory is Phase 16, which doesn't exist yet — but the column exists now so
-Phase 16 can populate it without another migration, the same way `retrievals.detected_metadata_filter`
-anticipated Phase 11 while Phases 9-10 left it null.
+`response_budget_tokens`, `total_tokens`. `conversation_tokens` was always `0` through Phase 15 —
+persistent conversation memory didn't exist yet — but the column existed already so Phase 16 could
+populate it without another migration, the same way `retrievals.detected_metadata_filter`
+anticipated Phase 11 while Phases 9-10 left it null. As of Phase 16, `PromptService.build_prompt`
+accepts an optional `conversation_text` and counts its tokens into this column whenever
+`ConversationService.send_message` calls it with short-term chat history.
 
 `citations` (Citation Engine, section 80) is JSONB — a list of `{source_label, chunk_id,
 document_id, document_filename, page, section, confidence}` objects — because its shape is a
@@ -1011,11 +1013,50 @@ in `attempted_providers`, not a silent 500.
 
 # 21. Conversation Schema
 
-**Pending — Conversation Memory phase.**
+Phase 16 (Conversation Memory, docs/02-architecture.md sections 91-97) adds migration
+`0017_add_conversation_tables`: `conversations`, `messages`, `conversation_summaries` (Memory
+Schema's `conversation_memory` table is documented in section 22 below, since it's long-term/
+repository-scoped rather than conversation-scoped).
+
+**`conversations`** is scoped to `(document_id, vector_index_id)` — the same granularity as
+`Retrieval` — plus a denormalized `repository_id` (avoids a join through `documents` on every
+RBAC check, the same rationale `retrievals.repository_id` already uses) and a nullable
+`prompt_template_id` (`ON DELETE SET NULL`) used as the base system prompt for every turn instead
+of the built-in default. `total_tokens` is a running cumulative counter updated on every
+`send_message` call, not recomputed from `messages` at read time — cheap to charts/inspect
+directly, the same convention as `retrievals.avg_similarity`.
+
+**`messages`** is one row per turn: `role` (enum `user`/`assistant`), `content`, `token_count`, and
+three nullable FKs (`retrieval_id`/`prompt_id`/`llm_request_id`, all `ON DELETE SET NULL`) linking
+an assistant turn back to the exact Phase 9/14/15 rows that produced it — nullable because a user
+message has none of these, and a failed-retrieval assistant fallback message may only have
+`retrieval_id` set. `ON DELETE SET NULL` (not CASCADE) because deleting an old `Retrieval` shouldn't
+silently delete conversation history that quotes it — the message stays, just loses its
+provenance link.
+
+**`conversation_summaries`** is additive/versioned like `PromptTemplate` — a new row per
+summarization pass, never a destructive UPDATE overwriting the previous summary — because
+`covers_up_to_message_id` marks exactly which messages a given summary replaces, and an older
+summary row stays valid evidence of what the conversation looked like at that point even after a
+newer one supersedes it for building future prompts. `covers_message_count` is a cheap
+denormalized total (avoids re-counting `messages` to display "summarized N messages so far").
 
 # 22. Memory Schema
 
-**Pending — Conversation Memory phase.**
+Phase 16. One table, `conversation_memory`, holding **long-term** memory — deliberately separate
+from `conversations`/`messages` because docs/02-architecture.md section 95 requires it to persist
+"across conversations," not be scoped to one chat session or document.
+
+Unique on `(user_id, repository_id)` — every user has their own instructions per repository, never
+shared across users or leaked across repositories. `custom_instructions` (text, nullable) is
+appended to the system prompt of every conversation that user has in that repository
+(`ConversationService._resolve_system_prompt`). `preferences` (JSONB, nullable) is reserved for
+future per-user settings; no feature writes to it yet, so it is always `null` today. Two items
+docs/02-architecture.md section 95 lists under long-term memory have **no column here at all**:
+"Frequently Accessed Repositories" is deliberately not stored as data — `MemoryService`'s
+`frequently_accessed_repositories` computes it live via a `GROUP BY`/`func.count` query instead of
+maintaining a counter that could drift stale — and "Saved Searches" isn't implemented, since no
+resource in this API yet represents a savable "search" independent of a retrieval/conversation.
 
 # 23. Evaluation Schema
 

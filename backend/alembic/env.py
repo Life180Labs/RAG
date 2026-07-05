@@ -11,6 +11,7 @@ from app.core.config import get_settings
 from app.models import (  # noqa: F401
     audit_log,
     chunk,
+    conversation,
     document,
     document_content,
     embedding,

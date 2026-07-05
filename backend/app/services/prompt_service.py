@@ -10,7 +10,7 @@ reranking (Phase 13) or embedding generation (Phase 7) do.
 
 Depends on `RetrievalService` rather than its own copy of
 document/vector-index/retrieval verification — that logic already lives
-there (`_get_vector_index`, `get_retrieval`, `get_results`) and
+there (`get_vector_index`, `get_retrieval`, `get_results`) and
 duplicating it here would just be two places that could drift out of
 sync on what "this retrieval belongs to this document" means.
 """
@@ -56,6 +56,7 @@ class PromptService:
         payload: CreatePromptRequest,
         *,
         actor_id: uuid.UUID,
+        conversation_text: str | None = None,
     ) -> Prompt:
         retrieval = await self.retrievals.get_retrieval(document.id, vector_index_id, retrieval_id)
         if retrieval.status != RetrievalStatus.COMPLETED:
@@ -83,7 +84,10 @@ class PromptService:
         assert system_prompt is not None
         query_tokens = count_tokens(retrieval.query_text)
         system_prompt_tokens = count_tokens(system_prompt)
-        conversation_tokens = 0  # Phase 16 (conversation memory) does not exist yet.
+        # Populated by Phase 16 (ConversationService) when this build is one turn of a
+        # conversation; every other caller (the standalone Prompt Playground) has no
+        # conversation, so this stays 0 exactly as it did before Phase 16 existed.
+        conversation_tokens = count_tokens(conversation_text) if conversation_text else 0
 
         context_budget = available_context_tokens(
             model_context_window=payload.model_context_window,
@@ -135,6 +139,7 @@ class PromptService:
             query_text=retrieval.query_text,
             formatting_instructions=formatting_instructions,
             output_schema=output_schema,
+            conversation_text=conversation_text,
         )
 
         prompt.context_tokens = count_tokens(context_text)

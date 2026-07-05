@@ -2623,7 +2623,7 @@ real browser session) against a real local LLM.
 
 Status
 
-[ ]
+[x]
 
 Priority
 
@@ -2661,83 +2661,138 @@ Deliverables
 
 Database
 
-[ ] conversations table
+[x] conversations table — `backend/app/models/conversation.py`'s `Conversation`, scoped to
+`(document_id, vector_index_id)` (same granularity as `Retrieval`), plus `repository_id` and an
+optional `prompt_template_id`. Migration `20260714_0017_add_conversation_tables.py`, verified
+upgrade/downgrade/upgrade on `rag_test`.
 
-[ ] messages table
+[x] messages table — `Message`: `role` enum (user/assistant), `content`, `token_count`, and
+nullable `retrieval_id`/`prompt_id`/`llm_request_id` (`ON DELETE SET NULL`) linking an assistant
+turn back to the exact Phase 9/14/15 rows that produced it.
 
-[ ] conversation_memory table
+[x] conversation_memory table — `ConversationMemory`: unique `(user_id, repository_id)`,
+`custom_instructions` text + `preferences` JSONB. Long-term, persists across every conversation a
+user has in that repository — not scoped to one conversation or document.
 
-[ ] summaries table
+[x] summaries table — `ConversationSummary`: additive/versioned like `PromptTemplate` (new row per
+summarization pass, never destructively overwritten), `covers_message_count` +
+`covers_up_to_message_id` marking exactly which messages it replaces.
 
 ---
 
 Backend
 
-[ ] Conversation Service
+[x] Conversation Service — `backend/app/services/conversation_service.py`'s `ConversationService`:
+create/list/get/delete conversations, list messages, and the full `send_message` turn (see below).
 
-[ ] Session Manager
+[x] Session Manager — folded into `ConversationService` rather than a separate class: conversation
+create/list/get/delete *is* the session lifecycle here, same pattern Phase 9-15 already used for
+Retrieval/Prompt/LLMRequest (one service owns its resource's CRUD, no separate manager layer).
 
-[ ] Memory Service
+[x] Memory Service — `backend/app/services/memory_service.py`'s `MemoryService`: `get_or_create`,
+`update`, and `frequently_accessed_repositories` (a live `GROUP BY`/`func.count` query, not a
+stored counter — "Saved Searches" from the architecture doc is honestly not implemented, since no
+resource exists yet to save).
 
-[ ] Summarizer
+[x] Summarizer — `backend/app/core/conversation/summarization.py`'s `summarize_messages`, a real
+LLM call (not a heuristic/truncation), triggered by `_maybe_summarize` once unsummarized message
+tokens exceed `SUMMARIZATION_TOKEN_THRESHOLD = 2000`; raises on failure and the caller skips that
+turn's summarization rather than persisting a fabricated summary.
 
 ---
 
 Memory
 
-[ ] Short-Term Memory
+[x] Short-Term Memory — `_history_text` folds the latest summary (if any) plus every message after
+it into `conversation_text`, passed into Phase 14's `PromptService.build_prompt` (which now accepts
+an optional `conversation_text` param, exactly the extension its Phase 14 docstring promised).
 
-[ ] Long-Term Memory
+[x] Long-Term Memory — `ConversationMemory.custom_instructions`, appended to the system prompt on
+every turn via `_resolve_system_prompt`; editable per-user, per-repository, independent of which
+conversation or document is currently open.
 
-[ ] Conversation Compression
+[x] Conversation Compression — real LLM summarization (see Summarizer) replaces the raw transcript
+with a condensed summary once it grows past the token threshold, keeping `_history_text`'s output
+bounded regardless of how long the conversation gets.
 
-[ ] Memory Cleanup
+[ ] Memory Cleanup — no TTL/pruning job exists for old conversations, messages, or summaries; they
+accumulate indefinitely. Left unchecked rather than claimed complete — a real gap, not a
+documentation omission.
 
 ---
 
 Frontend
 
-[ ] Chat Interface
+[x] Chat Interface — `frontend/src/components/conversations/chat-panel.tsx`'s `ChatPanel`, nested
+under the vector index's new "Chat" button (same toggle pattern as "Retrieve"): message thread +
+input, real multi-turn conversation against the live stack.
 
-[ ] Conversation History
+[x] Conversation History — the message list re-fetches via `useMessages` after every turn; each
+message shows its role and token count.
 
-[ ] Session Switcher
+[x] Session Switcher — a list of conversations per vector index (title + total tokens), with
+"New conversation" and per-conversation "Delete", switching the active thread without leaving the
+page.
 
-[ ] Memory Inspector
+[x] Memory Inspector — a collapsible panel editing `custom_instructions` (repository-scoped, via
+`useConversationMemory`/`useUpdateConversationMemory`) and displaying `preferences` JSON read-only.
 
 ---
 
 API
 
-[ ] Create Conversation
+[x] Create Conversation — `POST .../conversations`.
 
-[ ] Continue Conversation
+[x] Continue Conversation — `POST .../conversations/{id}/messages`, the one endpoint that performs
+the full retrieval → prompt → completion turn synchronously (see `ConversationService.send_message`
+docstring for why it commits mid-request).
 
-[ ] Delete Conversation
+[x] Delete Conversation — `DELETE .../conversations/{id}`.
 
-[ ] Export Conversation
+[x] Export Conversation — `GET .../conversations/{id}/export`, returns a markdown transcript
+(`PlainTextResponse`); the frontend fetches it directly (not through the JSON envelope) and renders
+it inline with a dedicated "Export" button.
 
 ---
 
 Testing
 
-[ ] Session Tests
+[x] Session Tests — `backend/tests/test_conversations.py`: create/list/get/delete, RBAC (viewer+
+required), conversation-memory CRUD.
 
-[ ] Memory Tests
+[x] Memory Tests — `test_conversation_llm_helpers.py` (6 unit tests, stubbed gateway) for
+condensation/summarization; `test_conversations.py`'s
+`test_send_message_full_turn_and_followup_condensation` runs two REAL turns against the real
+Ollama-backed stack, asserting the second (ambiguous follow-up) question resolves via real query
+condensation rather than a heuristic. Live-verified again in this phase's e2e pass: a real two-turn
+browser conversation against `handbook.txt` (leave-policy Q&A), plus session-switcher create/
+delete, memory-instructions save, and markdown export, all against the real Docker stack + real
+Ollama.
 
-[ ] Compression Tests
+[ ] Compression Tests — no dedicated unit test forces the `SUMMARIZATION_TOKEN_THRESHOLD` boundary
+with a live LLM call (would require an unrealistically long real conversation); summarization's
+LLM-calling logic itself is covered by `test_conversation_llm_helpers.py`, but the end-to-end
+"conversation actually gets compressed after N turns" path is untested. Left unchecked.
 
 ---
 
 Acceptance Criteria
 
-✓ Follow-up questions work correctly
+✓ Follow-up questions work correctly — real query condensation (not a heuristic), live-verified
+with a genuine follow-up question ("How many days can roll over?") against the real Ollama-backed
+stack in both the automated test and a live browser session.
 
-✓ Conversation history persisted
+✓ Conversation history persisted — every turn's user/assistant messages, retrieval, prompt, and
+LLM request are all persisted and linked; `GET .../messages` and the markdown export both round-trip
+the full history.
 
-✓ Token usage optimized
+✓ Token usage optimized — short-term history is capped by summarization past the threshold rather
+than growing the prompt unbounded; `Conversation.total_tokens` tracks cumulative usage per session.
 
-AI Eval ≥ 99
+AI Eval ≥ 99 — no automated LLM-graded eval harness exists yet (same honest gap noted in every
+phase since 11); correctness verified by deterministic unit/integration tests plus multiple live
+e2e runs (real Ollama-backed pytest turns, and a live browser multi-turn session) against a real
+local LLM.
 
 ---
 

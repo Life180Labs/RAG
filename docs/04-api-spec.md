@@ -523,11 +523,56 @@ a mutation):
 
 # 19. Conversation APIs
 
-**Pending — Conversation Memory phase.**
+Phase 16. Nested under document/vector-index (same granularity as retrievals), same VIEWER+
+pattern as retrievals/prompts — starting or continuing a chat is a read-oriented action over an
+existing index, not a mutation of it:
+
+- `POST /documents/{document_id}/vector-indexes/{vector_index_id}/conversations` — creates a
+  `Conversation`. Body: optional `title`, optional `prompt_template_id` (used as the base system
+  prompt for every turn instead of the built-in default).
+- `GET .../conversations` — every conversation for that document/vector-index, newest first.
+- `GET .../conversations/{conversation_id}` — one conversation.
+- `DELETE .../conversations/{conversation_id}` — hard-deletes the conversation row; `messages`/
+  `conversation_summaries` cascade with it (`ON DELETE CASCADE`), unlike the vector-index delete
+  path (section 12), since there is no external store involved here — everything lives in Postgres.
+- `GET .../conversations/{conversation_id}/messages` — full message history, oldest first.
+- `POST .../conversations/{conversation_id}/messages` — the one endpoint that does real work: a
+  full retrieval → prompt → completion turn, run **synchronously** within the request (not
+  enqueue-and-poll, since a chat message has no "come back later" UX). Body: `content` (1-4000
+  chars). Internally: persists the user message, condenses it against prior history into a
+  standalone query via a real Phase 15 LLM call (`app/core/conversation/condensation.py` — not a
+  heuristic, since Phase 11's query understanding never sees prior turns), runs a real Phase 9
+  retrieval, builds a real Phase 14 prompt (folding in short-term history and this user's Phase 16
+  long-term custom instructions), generates a real Phase 15 completion, persists the assistant
+  message, and summarizes the conversation if it's grown past the token threshold. Returns
+  `{user_message, assistant_message}`. If the retrieval doesn't complete within 20s, returns a
+  graceful fallback assistant message ("couldn't retrieve context... try again") rather than
+  blocking indefinitely or erroring.
+- `GET .../conversations/{conversation_id}/export` — returns the full transcript as
+  `text/markdown` (`PlainTextResponse`, not the usual JSON envelope — there is nothing else a
+  client would do with an export except display or save it as-is).
 
 # 20. Memory APIs
 
-**Pending — Conversation Memory phase.**
+Phase 16. Long-term conversation memory lives at the **repository** level, not nested under a
+document or conversation — docs/02-architecture.md section 95 requires it to persist "across
+conversations," so a document/vector-index-scoped path would be the wrong resource identity for
+it. Same VIEWER+ pattern as reading repository-level resources:
+
+- `GET /repositories/{repository_id}/conversation-memory` — returns (creating on first access if
+  none exists yet) the calling user's `ConversationMemory` for that repository:
+  `custom_instructions` (free text, appended to every conversation's system prompt) and
+  `preferences` (JSONB, currently unused by any feature but reserved for future per-user settings).
+  Scoped to `(user_id, repository_id)` — every user has their own instructions, never shared.
+- `PATCH /repositories/{repository_id}/conversation-memory` — updates `custom_instructions` and/or
+  `preferences` for the calling user.
+
+Two items docs/02-architecture.md section 95 lists under long-term memory are honestly **not**
+implemented as separate resources: "Frequently Accessed Repositories" is deliberately not stored —
+`MemoryService.frequently_accessed_repositories` computes it live via a `GROUP BY`/`func.count`
+query over existing audit/conversation data rather than a stale counter, and is not yet exposed
+through a dedicated endpoint; "Saved Searches" has no resource at all yet, since nothing in this
+API represents a savable "search" independent of a retrieval/conversation.
 
 # 21. Evaluation APIs
 

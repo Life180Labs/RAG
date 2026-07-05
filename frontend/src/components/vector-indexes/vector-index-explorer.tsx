@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 
+import { ChatPanel } from '@/components/conversations/chat-panel';
 import { RetrievalPlayground } from '@/components/retrieval/retrieval-playground';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Badge } from '@/components/ui/badge';
@@ -40,6 +41,7 @@ export function VectorIndexExplorer({
   const [selectedIndexType, setSelectedIndexType] = useState<VectorIndexType>('hnsw');
   const [error, setError] = useState<string | null>(null);
   const [expandedVectorIndexId, setExpandedVectorIndexId] = useState<string | null>(null);
+  const [expandedChatVectorIndexId, setExpandedChatVectorIndexId] = useState<string | null>(null);
 
   const { data: indexes, isLoading } = useVectorIndexes(documentId, chunkSetId, embeddingVersionId);
   const createOrRebuild = useCreateOrRebuildIndex(documentId, chunkSetId, embeddingVersionId);
@@ -143,6 +145,19 @@ export function VectorIndexExplorer({
                       Retrieve
                     </Button>
                   )}
+                  {index.status === 'ready' && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() =>
+                        setExpandedChatVectorIndexId((current) =>
+                          current === index.id ? null : index.id,
+                        )
+                      }
+                    >
+                      Chat
+                    </Button>
+                  )}
                   <Button variant="ghost" size="sm" onClick={() => handleDelete(index.id)}>
                     Delete
                   </Button>
@@ -150,6 +165,9 @@ export function VectorIndexExplorer({
               </div>
               {expandedVectorIndexId === index.id && (
                 <RetrievalPlayground documentId={documentId} vectorIndexId={index.id} />
+              )}
+              {expandedChatVectorIndexId === index.id && (
+                <ChatPanel documentId={documentId} vectorIndexId={index.id} />
               )}
             </li>
           ))}
