@@ -67,6 +67,19 @@ Phase 12 (advanced retrieval) inserts three more opt-in stages between
   compresses each result's chunk text down to its query-relevant
   sentences (`retrieval_worker.compression`) and persists that
   alongside (not instead of) the original in `RetrievalResult.compressed_text`.
+
+Phase 13 (reranking, docs/02-architecture.md sections 71-74) inserts a
+fourth stage between "parent-child expand" and "MMR select/truncate":
+`rerank_enabled`/`reranker_provider` re-score every candidate still in
+the pool with a real cross-encoder (`retrieval_worker.reranking`) that
+sees the (query, chunk_text) pair jointly, then re-sort by that score.
+The candidate pool widens further when reranking is on (there must be
+more than `top_k` candidates left for reranking to meaningfully
+reorder). `rerank_score` is persisted *alongside* `score` (never
+overwriting it, same pattern `dense_score`/`sparse_score` established)
+so both signals stay independently inspectable; MMR (if also enabled)
+uses `rerank_score` as its relevance term instead of `score` once
+reranking has run, since it's the more accurate signal at that point.
 """
 
 import json
@@ -84,6 +97,7 @@ from index_worker.providers.base import UnsupportedMetricError
 from index_worker.providers.factory import get_provider as get_index_provider
 from retrieval_worker import bm25, compression, fusion, mmr, parent_expansion
 from retrieval_worker.query_understanding import classifier, expander, filter_extractor, rewriter
+from retrieval_worker.reranking import factory as reranking_factory
 
 logger = get_logger(__name__)
 
@@ -150,6 +164,7 @@ def execute_retrieval(retrieval_id: str) -> dict:
                 "r.metadata_filter, r.retrieval_mode, r.fusion_method, r.dense_weight, "
                 "r.sparse_weight, r.rrf_k, r.query_understanding_enabled, "
                 "r.expand_to_parent, r.use_mmr, r.mmr_lambda, r.compress_context, "
+                "r.rerank_enabled, r.reranker_provider, "
                 "vi.document_id, vi.provider AS index_provider, "
                 "vi.namespace, ev.provider AS embed_provider, ev.model, ev.chunk_set_id "
                 "FROM retrievals r "
@@ -170,9 +185,15 @@ def execute_retrieval(retrieval_id: str) -> dict:
         # A larger candidate pool than top_k so fusion/MMR have real
         # candidates to work from, not just an already-truncated top_k
         # (docs/02-architecture.md section 60).
-        pool_size = (
-            max(row.top_k * 3, 20) if (is_hybrid or is_rag_fusion or row.use_mmr) else row.top_k
-        )
+        pool_size = row.top_k
+        if is_hybrid or is_rag_fusion or row.use_mmr:
+            pool_size = max(pool_size, row.top_k * 3, 20)
+        if row.rerank_enabled:
+            # Reranking is only useful over a candidate set noticeably
+            # wider than the final top_k (docs/02-architecture.md section
+            # 71's "Top 100" example) — otherwise there's nothing left to
+            # meaningfully reorder.
+            pool_size = max(pool_size, row.top_k * 5, 50)
 
         query_intent = None
         intent_confidence = None
@@ -305,6 +326,40 @@ def execute_retrieval(retrieval_id: str) -> dict:
             results_pool = parent_expansion.expand(results_pool, parent_map)
             results_pool.sort(key=lambda r: r["score"], reverse=True)
 
+        chunk_text_by_id: dict[str, str] = {}
+        if row.rerank_enabled or row.compress_context:
+            chunk_text_rows = session.execute(
+                text("SELECT id, text FROM chunks WHERE chunk_set_id = :chunk_set_id"),
+                {"chunk_set_id": row.chunk_set_id},
+            ).all()
+            chunk_text_by_id = {str(ctr.id): ctr.text for ctr in chunk_text_rows}
+
+        for result in results_pool:
+            result["rerank_score"] = None
+
+        if row.rerank_enabled and results_pool:
+            candidates = [
+                (r["chunk_id"], chunk_text_by_id[r["chunk_id"]])
+                for r in results_pool
+                if r["chunk_id"] in chunk_text_by_id
+            ]
+            try:
+                reranker = reranking_factory.get_provider(row.reranker_provider.lower())
+                rerank_hits = reranker.rerank(row.query_text, candidates)
+            except Exception as exc:
+                message = f"Reranking failed: {exc}"[:500]
+                _fail(session, retrieval_id, message)
+                raise
+            rerank_score_by_id = {hit.chunk_id: hit.score for hit in rerank_hits}
+            for r in results_pool:
+                r["rerank_score"] = rerank_score_by_id.get(r["chunk_id"])
+            results_pool.sort(
+                key=lambda r: r["rerank_score"] if r["rerank_score"] is not None else float("-inf"),
+                reverse=True,
+            )
+
+        relevance_key = "rerank_score" if row.rerank_enabled else "score"
+
         if row.use_mmr and results_pool:
             vector_rows = session.execute(
                 text(
@@ -318,7 +373,7 @@ def execute_retrieval(retrieval_id: str) -> dict:
             }
             candidates = sorted(
                 (
-                    mmr.RankedCandidate(chunk_id=r["chunk_id"], score=r["score"])
+                    mmr.RankedCandidate(chunk_id=r["chunk_id"], score=r[relevance_key])
                     for r in results_pool
                 ),
                 key=lambda c: c.score,
@@ -333,13 +388,8 @@ def execute_retrieval(retrieval_id: str) -> dict:
 
         compressed_by_chunk_id: dict[str, str] = {}
         if row.compress_context and results:
-            chunk_text_rows = session.execute(
-                text("SELECT id, text FROM chunks WHERE chunk_set_id = :chunk_set_id"),
-                {"chunk_set_id": row.chunk_set_id},
-            ).all()
-            text_by_chunk_id = {str(ctr.id): ctr.text for ctr in chunk_text_rows}
             for result in results:
-                chunk_text = text_by_chunk_id.get(result["chunk_id"])
+                chunk_text = chunk_text_by_id.get(result["chunk_id"])
                 if chunk_text:
                     compressed_by_chunk_id[result["chunk_id"]] = compression.compress(
                         chunk_text, row.query_text
@@ -355,9 +405,9 @@ def execute_retrieval(retrieval_id: str) -> dict:
                 text(
                     "INSERT INTO retrieval_results "
                     "(id, retrieval_id, chunk_id, rank, score, dense_score, sparse_score, "
-                    "compressed_text) "
+                    "compressed_text, rerank_score) "
                     "VALUES (:id, :retrieval_id, :chunk_id, :rank, :score, :dense_score, "
-                    ":sparse_score, :compressed_text)"
+                    ":sparse_score, :compressed_text, :rerank_score)"
                 ),
                 {
                     "id": str(uuid.uuid4()),
@@ -368,6 +418,7 @@ def execute_retrieval(retrieval_id: str) -> dict:
                     "dense_score": result["dense_score"],
                     "sparse_score": result["sparse_score"],
                     "compressed_text": compressed_by_chunk_id.get(result["chunk_id"]),
+                    "rerank_score": result["rerank_score"],
                 },
             )
 

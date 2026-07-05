@@ -34,6 +34,9 @@ class WorkerSettings(BaseSettings):
     openai_api_key: str | None = None
     voyage_api_key: str | None = None
     jina_api_key: str | None = None
+    # Reranking (Phase 13) — Cohere Rerank is a new cloud provider, gated
+    # the same optional/skip way as the Phase 7 cloud embedding providers.
+    cohere_api_key: str | None = None
 
     # Vector index providers (Phase 8). Qdrant/Chroma are self-hosted via
     # docker-compose; the defaults below match docker-compose.yml's default

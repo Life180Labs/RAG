@@ -72,6 +72,8 @@ class RetrievalService:
                 use_mmr=payload.use_mmr,
                 mmr_lambda=payload.mmr_lambda,
                 compress_context=payload.compress_context,
+                rerank_enabled=payload.rerank_enabled,
+                reranker_provider=payload.reranker_provider,
                 status=RetrievalStatus.PENDING,
                 created_by=actor_id,
             )

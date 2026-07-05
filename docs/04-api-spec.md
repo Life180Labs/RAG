@@ -365,7 +365,7 @@ VIEWER+.
 
 | Method | Path | Auth | Notes |
 |--------|------|----------|---------|
-| POST   | `/api/v1/documents/{document_id}/vector-indexes/{vector_index_id}/retrievals` | Document VIEWER | Run a retrieval query; body `{"query_text": "...", "top_k": 10, "score_threshold": null, "similarity_metric": "cosine", "metadata_filter": null, "retrieval_mode": "dense", "fusion_method": null, "dense_weight": null, "sparse_weight": null, "rrf_k": null, "query_understanding_enabled": false, "expand_to_parent": false, "use_mmr": false, "mmr_lambda": null, "compress_context": false}` (only `query_text` required) |
+| POST   | `/api/v1/documents/{document_id}/vector-indexes/{vector_index_id}/retrievals` | Document VIEWER | Run a retrieval query; body `{"query_text": "...", "top_k": 10, "score_threshold": null, "similarity_metric": "cosine", "metadata_filter": null, "retrieval_mode": "dense", "fusion_method": null, "dense_weight": null, "sparse_weight": null, "rrf_k": null, "query_understanding_enabled": false, "expand_to_parent": false, "use_mmr": false, "mmr_lambda": null, "compress_context": false, "rerank_enabled": false, "reranker_provider": null}` (only `query_text` required) |
 | GET    | `/api/v1/documents/{document_id}/vector-indexes/{vector_index_id}/retrievals` | Document VIEWER | List past retrievals against this index, most recent first; `?limit=50&offset=0` |
 | GET    | `/api/v1/documents/{document_id}/vector-indexes/{vector_index_id}/retrievals/{retrieval_id}` | Document VIEWER | Get one retrieval's status and aggregate stats |
 | GET    | `/api/v1/documents/{document_id}/vector-indexes/{vector_index_id}/retrievals/{retrieval_id}/results` | Document VIEWER | Get the ranked candidate list (chunk text, heading, page, rank, score) |
@@ -433,9 +433,22 @@ pipeline description of each.
   sentences. The results response gains `compressed_text` (`null` unless `compress_context` was
   set) — populated *alongside* the unabridged `chunk_text`, never replacing it.
 
+**Reranking (Phase 13)**: `rerank_enabled` (default `false`) opts a retrieval into cross-encoder
+reranking — see docs/03-database.md section 19 for the full pipeline description and provider
+list. `reranker_provider` accepts `cross_encoder` (default when `rerank_enabled` is `true` and
+this is omitted), `bge`, `flashrank`, `cohere`, or `jina`; the last two require the corresponding
+`COHERE_API_KEY`/`JINA_API_KEY` to be configured on the worker (not exposed via this API — a
+misconfigured cloud reranker fails the retrieval with `status: "failed"` and an explanatory
+`status_message`, the same contract every other provider-gated failure in this API uses). The
+results response gains `rerank_score` (`null` unless `rerank_enabled` was set) — populated
+*alongside* `score`, `dense_score`, and `sparse_score`, never replacing any of them, so every
+stage's signal stays independently inspectable.
+
 # 16. Reranking APIs
 
-**Pending — Reranking Architecture phase.**
+Folded into the Retrieval APIs above (section 15) rather than a separate endpoint — reranking is
+one more opt-in stage of the same `POST .../retrievals` request/response, not an independent
+resource with its own lifecycle. See section 15's "Reranking (Phase 13)" entry.
 
 # 17. Prompt APIs
 

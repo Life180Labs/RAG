@@ -18,6 +18,16 @@ export const FUSION_METHODS: { value: FusionMethod; label: string }[] = [
   { value: 'rag_fusion', label: 'RAG Fusion (requires query understanding)' },
 ];
 
+export type RerankerProvider = 'cross_encoder' | 'bge' | 'flashrank' | 'cohere' | 'jina';
+
+export const RERANKER_PROVIDERS: { value: RerankerProvider; label: string }[] = [
+  { value: 'cross_encoder', label: 'Cross Encoder (MiniLM, local)' },
+  { value: 'bge', label: 'BGE Reranker (local)' },
+  { value: 'flashrank', label: 'FlashRank (local)' },
+  { value: 'cohere', label: 'Cohere Rerank (cloud)' },
+  { value: 'jina', label: 'Jina Reranker (cloud)' },
+];
+
 export type QueryIntent =
   | 'fact_lookup'
   | 'definition'
@@ -67,6 +77,8 @@ export interface Retrieval {
   use_mmr: boolean;
   mmr_lambda: number | null;
   compress_context: boolean;
+  rerank_enabled: boolean;
+  reranker_provider: RerankerProvider | null;
   status: RetrievalStatus;
   status_message: string | null;
   result_count: number;
@@ -86,6 +98,7 @@ export interface RetrievalResult {
   dense_score: number | null;
   sparse_score: number | null;
   compressed_text: string | null;
+  rerank_score: number | null;
   chunk_text: string;
   chunk_heading: string | null;
   chunk_page: number | null;
@@ -107,4 +120,6 @@ export interface CreateRetrievalRequest {
   use_mmr?: boolean;
   mmr_lambda?: number;
   compress_context?: boolean;
+  rerank_enabled?: boolean;
+  reranker_provider?: RerankerProvider;
 }

@@ -111,6 +111,8 @@ def _insert_retrieval(vector_index_id: str, document_id: uuid.UUID, **overrides)
         "use_mmr": False,
         "mmr_lambda": None,
         "compress_context": False,
+        "rerank_enabled": False,
+        "reranker_provider": None,
         "status": "PENDING",
         "result_count": 0,
         **overrides,
@@ -122,13 +124,15 @@ def _insert_retrieval(vector_index_id: str, document_id: uuid.UUID, **overrides)
                 "(id, vector_index_id, document_id, query_text, top_k, score_threshold, "
                 "similarity_metric, metadata_filter, retrieval_mode, fusion_method, "
                 "dense_weight, sparse_weight, rrf_k, query_understanding_enabled, "
-                "expand_to_parent, use_mmr, mmr_lambda, compress_context, status, "
+                "expand_to_parent, use_mmr, mmr_lambda, compress_context, "
+                "rerank_enabled, reranker_provider, status, "
                 "result_count, created_at, updated_at) "
                 "VALUES (:id, :vector_index_id, :document_id, :query_text, :top_k, "
                 ":score_threshold, :similarity_metric, CAST(:metadata_filter AS jsonb), "
                 ":retrieval_mode, :fusion_method, :dense_weight, :sparse_weight, :rrf_k, "
                 ":query_understanding_enabled, :expand_to_parent, :use_mmr, :mmr_lambda, "
-                ":compress_context, :status, :result_count, now(), now())"
+                ":compress_context, :rerank_enabled, :reranker_provider, "
+                ":status, :result_count, now(), now())"
             ),
             {**fields, "metadata_filter": json.dumps(fields["metadata_filter"])
                 if fields["metadata_filter"] is not None else None},
@@ -522,3 +526,67 @@ def test_execute_retrieval_rag_fusion_hybrid(document_chain):
         ).first()
         assert row.fusion_method == "RAG_FUSION"
         assert row.retrieval_mode == "HYBRID"
+
+
+def test_execute_retrieval_reranking_populates_rerank_score(document_chain):
+    document_id = _insert_document_with_content(
+        document_chain["repository_id"], document_chain["user_id"]
+    )
+    vector_index_id = _build_pgvector_index(document_id)
+    retrieval_id = _insert_retrieval(
+        vector_index_id,
+        document_id,
+        query_text="Section One",
+        rerank_enabled=True,
+        reranker_provider="CROSS_ENCODER",
+    )
+
+    result = execute_retrieval.run(retrieval_id)
+    assert result["status"] == "completed"
+    assert result["result_count"] > 0
+
+    with SessionLocal() as session:
+        row = session.execute(
+            text("SELECT reranker_provider FROM retrievals WHERE id = :id"),
+            {"id": retrieval_id},
+        ).first()
+        assert row.reranker_provider == "CROSS_ENCODER"
+
+        rows = session.execute(
+            text("SELECT rerank_score FROM retrieval_results WHERE retrieval_id = :id"),
+            {"id": retrieval_id},
+        ).all()
+        assert all(r.rerank_score is not None for r in rows)
+
+
+def test_execute_retrieval_reranking_reorders_by_relevance(document_chain):
+    # Two distractor chunks plus one that's an exact phrase match for
+    # the query — dense similarity from a small local embedding model
+    # over a tiny corpus has no strong reason to rank the exact match
+    # first, but a real cross-encoder should.
+    document_id = _insert_document_with_hybrid_content(
+        document_chain["repository_id"], document_chain["user_id"]
+    )
+    vector_index_id = _build_pgvector_index(document_id, split_chunks=True)
+    retrieval_id = _insert_retrieval(
+        vector_index_id,
+        document_id,
+        query_text="What indicates a checkout timeout in the payment gateway?",
+        top_k=6,
+        rerank_enabled=True,
+        reranker_provider="CROSS_ENCODER",
+    )
+
+    result = execute_retrieval.run(retrieval_id)
+    assert result["status"] == "completed"
+
+    with SessionLocal() as session:
+        rows = session.execute(
+            text(
+                "SELECT rr.rank, c.text FROM retrieval_results rr "
+                "JOIN chunks c ON c.id = rr.chunk_id "
+                "WHERE rr.retrieval_id = :id ORDER BY rr.rank"
+            ),
+            {"id": retrieval_id},
+        ).all()
+        assert "XJ-9042" in rows[0].text

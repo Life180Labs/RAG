@@ -16,8 +16,10 @@ import { ApiRequestError } from '@/services/api-client';
 import {
   FUSION_METHODS,
   QUERY_INTENT_LABELS,
+  RERANKER_PROVIDERS,
   SIMILARITY_METRICS,
   type FusionMethod,
+  type RerankerProvider,
   type RetrievalMode,
   type RetrievalStatus,
   type SimilarityMetric,
@@ -49,6 +51,8 @@ export function RetrievalPlayground({
   const [useMmr, setUseMmr] = useState(false);
   const [mmrLambda, setMmrLambda] = useState(0.7);
   const [compressContext, setCompressContext] = useState(false);
+  const [rerankEnabled, setRerankEnabled] = useState(false);
+  const [rerankerProvider, setRerankerProvider] = useState<RerankerProvider>('cross_encoder');
   const [error, setError] = useState<string | null>(null);
   const [activeRetrievalId, setActiveRetrievalId] = useState<string | null>(null);
   const [showInspector, setShowInspector] = useState(false);
@@ -77,6 +81,8 @@ export function RetrievalPlayground({
         use_mmr: useMmr,
         ...(useMmr ? { mmr_lambda: mmrLambda } : {}),
         compress_context: compressContext,
+        rerank_enabled: rerankEnabled,
+        ...(rerankEnabled ? { reranker_provider: rerankerProvider } : {}),
         ...(ragFusionEnabled
           ? { fusion_method: 'rag_fusion' as const, rrf_k: rrfK }
           : mode === 'hybrid'
@@ -208,6 +214,29 @@ export function RetrievalPlayground({
           />
           <span className="text-muted-foreground">Compress context</span>
         </label>
+
+        <label className="flex items-center gap-2" data-testid="rerank-toggle">
+          <input
+            type="checkbox"
+            checked={rerankEnabled}
+            onChange={(event) => setRerankEnabled(event.target.checked)}
+          />
+          <span className="text-muted-foreground">Rerank</span>
+        </label>
+        {rerankEnabled && (
+          <select
+            className="border-input h-8 rounded-lg border bg-transparent px-2 text-sm"
+            value={rerankerProvider}
+            onChange={(event) => setRerankerProvider(event.target.value as RerankerProvider)}
+            data-testid="reranker-provider-select"
+          >
+            {RERANKER_PROVIDERS.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+        )}
       </div>
 
       <div className="flex flex-wrap items-center gap-2" data-testid="hybrid-search-dashboard">
@@ -289,6 +318,9 @@ export function RetrievalPlayground({
           {activeRetrieval.expand_to_parent && <Badge variant="secondary">parent-expanded</Badge>}
           {activeRetrieval.use_mmr && <Badge variant="secondary">mmr</Badge>}
           {activeRetrieval.compress_context && <Badge variant="secondary">compressed</Badge>}
+          {activeRetrieval.rerank_enabled && (
+            <Badge variant="secondary">rerank: {activeRetrieval.reranker_provider}</Badge>
+          )}
           {activeRetrieval.status === 'completed' && (
             <>
               <span className="text-muted-foreground text-xs">
@@ -385,6 +417,14 @@ export function RetrievalPlayground({
                     data-testid="retrieval-sparse-score"
                   >
                     sparse {result.sparse_score.toFixed(3)}
+                  </span>
+                )}
+                {result.rerank_score !== null && (
+                  <span
+                    className="text-muted-foreground text-xs"
+                    data-testid="retrieval-rerank-score"
+                  >
+                    rerank {result.rerank_score.toFixed(3)}
                   </span>
                 )}
                 {result.chunk_heading && (

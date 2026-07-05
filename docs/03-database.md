@@ -893,6 +893,39 @@ fusion and before persisting:
   retrieval time would add real latency this phase doesn't need to pay for a working compression
   step. Falls back to the single highest-overlap sentence rather than ever returning empty text.
 
+**Phase 13 (reranking, docs/02-architecture.md sections 71-74) adds migration `0014_add_reranking`**:
+`rerank_enabled`/`reranker_provider` on `retrievals` (opt-in, off by default), `rerank_score` on
+`retrieval_results`. A real cross-encoder scores every remaining candidate's `(query, chunk_text)`
+pair *jointly* — the reason reranking improves precision over the embedding-based retrieval score,
+which encodes query and chunk independently and only compares their vectors afterward
+(docs/02-architecture.md section 72's "Python threading" example: vector search ranks "Python
+snake" above "Python threading" on embedding similarity alone; a cross-encoder that actually reads
+both texts together doesn't make that mistake).
+
+`reranker_provider` supports five real providers (`worker/retrieval_worker/reranking/`):
+`cross_encoder` (default — `fastembed`'s ONNX `Xenova/ms-marco-MiniLM-L-6-v2`, ~80MB, pre-cached
+at Docker build time) and `bge` (`fastembed`'s `BAAI/bge-reranker-base`, ~1GB, downloads on first
+use — the same build-time-size tradeoff Phase 7 already documented for its non-default local
+embedding models) both run via the same `fastembed.rerank.cross_encoder.TextCrossEncoder` class
+Phase 7's local embedding providers' ONNX approach mirrors; `flashrank` is a separate, even
+lighter-weight local ONNX library (`ms-marco-TinyBERT-L-2-v2`, ~3MB) listed as its own required
+model in task.md rather than folded into the `fastembed`-backed pair; `cohere`/`jina` are real
+HTTP integrations against each provider's rerank API, gated by `COHERE_API_KEY`/`JINA_API_KEY`
+(Jina reuses the same key Phase 7's `JinaEmbeddingProvider` already gates on) — no paid keys are
+configured in this dev environment, so those two are exercised live only when the corresponding
+key is set, the same `pytest.mark.skipif` convention every other cloud provider in this codebase
+uses.
+
+Applied between "parent-child expand" and "MMR select/truncate" inside `execute_retrieval`: the
+candidate pool widens further when `rerank_enabled` (`max(top_k * 5, 50)`, echoing section 71's
+"Top 100" example at a scale this system's typically smaller chunk sets actually warrant) since
+reranking only has something to do with a pool noticeably larger than the final `top_k`.
+`rerank_score` is persisted *alongside* `score`, never overwriting it — the same pattern
+`dense_score`/`sparse_score` already established — so the pre- and post-rerank signals stay
+independently inspectable; final result order follows `rerank_score` once reranking has run, and
+MMR (if also enabled) uses `rerank_score` rather than `score` as its relevance term at that point,
+since it's the more accurate signal.
+
 # 20. Prompt Schema
 
 **Pending — Prompt Builder phase.**

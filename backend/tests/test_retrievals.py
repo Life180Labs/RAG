@@ -389,3 +389,50 @@ async def test_create_retrieval_accepts_query_understanding_enabled(client):
     # Analysis fields only populate once the worker runs (status=pending here).
     assert body["status"] == "pending"
     assert body["query_intent"] is None
+
+
+@pytest.mark.asyncio
+async def test_create_retrieval_defaults_reranking_disabled(client):
+    token = await _register_and_login(client, "owner@example.com")
+    document_id, vector_index_id = await _seed_index_chain(client, token)
+
+    response = await client.post(
+        f"/api/v1/documents/{document_id}/vector-indexes/{vector_index_id}/retrievals",
+        json={"query_text": "test"},
+        headers=_auth(token),
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()["data"]
+    assert body["rerank_enabled"] is False
+    assert body["reranker_provider"] is None
+
+
+@pytest.mark.asyncio
+async def test_create_retrieval_rerank_enabled_defaults_provider(client):
+    token = await _register_and_login(client, "owner@example.com")
+    document_id, vector_index_id = await _seed_index_chain(client, token)
+
+    response = await client.post(
+        f"/api/v1/documents/{document_id}/vector-indexes/{vector_index_id}/retrievals",
+        json={"query_text": "test", "rerank_enabled": True},
+        headers=_auth(token),
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()["data"]
+    assert body["rerank_enabled"] is True
+    assert body["reranker_provider"] == "cross_encoder"
+
+
+@pytest.mark.asyncio
+async def test_create_retrieval_rerank_accepts_explicit_provider(client):
+    token = await _register_and_login(client, "owner@example.com")
+    document_id, vector_index_id = await _seed_index_chain(client, token)
+
+    response = await client.post(
+        f"/api/v1/documents/{document_id}/vector-indexes/{vector_index_id}/retrievals",
+        json={"query_text": "test", "rerank_enabled": True, "reranker_provider": "flashrank"},
+        headers=_auth(token),
+    )
+    assert response.status_code == 200, response.text
+    body = response.json()["data"]
+    assert body["reranker_provider"] == "flashrank"

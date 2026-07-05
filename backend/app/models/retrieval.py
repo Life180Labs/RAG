@@ -62,6 +62,18 @@ they're the same capability Phase 11's `detected_metadata_filter` and
 54 and 65 describe the identical mechanism Phase 11's task.md section
 51-55 already named "Query Expansion" and "Metadata Detection"), and
 duplicating that logic under a second name would just be dead code.
+
+Phase 13 (reranking, docs/02-architecture.md sections 71-74) adds
+`rerank_enabled`/`reranker_provider`, opt-in and off by default like
+every Phase 10-12 addition. When enabled, `retrieval_worker.reranking`
+scores each candidate's (query, chunk_text) pair with a real
+cross-encoder — jointly, unlike embedding-based cosine similarity,
+which scores query and chunk independently — persisted as
+`RetrievalResult.rerank_score` *alongside* (not replacing) `score`,
+the same "each stage adds its own field" pattern `dense_score`/
+`sparse_score` already established, so the pre-rerank and post-rerank
+signals stay independently inspectable. Final result order (`rank`)
+follows `rerank_score` when reranking is enabled.
 """
 
 import enum
@@ -108,6 +120,14 @@ class FusionMethod(str, enum.Enum):
     WEIGHTED_SUM = "weighted_sum"
     RRF = "rrf"
     RAG_FUSION = "rag_fusion"
+
+
+class RerankerProvider(str, enum.Enum):
+    CROSS_ENCODER = "cross_encoder"
+    BGE = "bge"
+    FLASHRANK = "flashrank"
+    COHERE = "cohere"
+    JINA = "jina"
 
 
 class Retrieval(Base, UUIDPrimaryKeyMixin, TimestampMixin):
@@ -159,6 +179,10 @@ class Retrieval(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     use_mmr: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     mmr_lambda: Mapped[float | None] = mapped_column(Float, nullable=True)
     compress_context: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    rerank_enabled: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
+    reranker_provider: Mapped[RerankerProvider | None] = mapped_column(
+        Enum(RerankerProvider, name="reranker_provider"), nullable=True
+    )
     status: Mapped[RetrievalStatus] = mapped_column(
         Enum(RetrievalStatus, name="retrieval_status"),
         nullable=False,
@@ -195,3 +219,4 @@ class RetrievalResult(Base, UUIDPrimaryKeyMixin):
     dense_score: Mapped[float | None] = mapped_column(Float, nullable=True)
     sparse_score: Mapped[float | None] = mapped_column(Float, nullable=True)
     compressed_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    rerank_score: Mapped[float | None] = mapped_column(Float, nullable=True)

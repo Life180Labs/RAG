@@ -2239,7 +2239,7 @@ deterministic unit and integration tests above.
 
 Status
 
-[ ]
+[x]
 
 Priority
 
@@ -2269,53 +2269,92 @@ Deliverables
 
 Models
 
-[ ] BGE
+[x] BGE — `fastembed`'s ONNX `BAAI/bge-reranker-base` (~1GB, downloads on first use rather than
+being pre-cached — the same build-time-size tradeoff Phase 7 documented for its non-default
+local embedding models).
 
-[ ] Cohere
+[x] Cohere — real HTTP integration against `api.cohere.com/v1/rerank`, gated by `COHERE_API_KEY`
+(unset in this dev environment, so exercised live only via `pytest.mark.skipif`, same convention
+every other cloud provider in this codebase uses).
 
-[ ] Jina
+[x] Jina — real HTTP integration against `api.jina.ai/v1/rerank`, gated by the same
+`JINA_API_KEY` Phase 7's `JinaEmbeddingProvider` already uses (same account, same key).
 
-[ ] FlashRank
+[x] FlashRank — a separate, even lighter-weight local ONNX library (`ms-marco-TinyBERT-L-2-v2`,
+~3MB), its own required model per this checklist rather than folded into the `fastembed`-backed
+pair.
+
+The "Cross Encoder" deliverable above is the general mechanism, not a fifth distinct model — its
+concrete implementation is the `cross_encoder` provider (`fastembed`'s ONNX
+`Xenova/ms-marco-MiniLM-L-6-v2`, ~80MB, pre-cached at Docker build time and the default when
+`rerank_enabled` is set without an explicit provider).
 
 ---
 
 Backend
 
-[ ] Reranker Service
+[x] Reranker Service — `worker/retrieval_worker/reranking/` (`base.py`'s `RerankProvider`
+interface + `factory.get_provider`), mirroring `common.embedding_providers`' shape.
 
-[ ] Score Calculator
+[x] Score Calculator — each provider's `rerank()` scores every (query, chunk_text) pair jointly
+via a real cross-encoder or HTTP rerank call; persisted as `RetrievalResult.rerank_score`.
 
-[ ] Ranking Engine
+[x] Ranking Engine — `execute_retrieval` re-sorts the candidate pool by `rerank_score` once
+computed, and widens the pool beforehand (`max(top_k * 5, 50)`) so there's a meaningfully larger
+set to reorder, per docs/02-architecture.md section 71.
 
 ---
 
 Frontend
 
-[ ] Rerank Comparison
+[x] Score Viewer — the Retrieval Playground's results list shows `rerank_score` alongside
+`dense_score`/`sparse_score` per result (`data-testid="retrieval-rerank-score"`), plus a
+`rerank: {provider}` badge on the retrieval summary when active.
 
-[ ] Score Viewer
+[ ] Rerank Comparison — not built as a dedicated side-by-side comparison view (e.g. re-running
+the same query through two different rerankers and diffing the resulting order); only a single
+reranker can be selected per retrieval this phase, consistent with the toggle-based (not
+dedicated-page) frontend surface Phase 12 already established for its own advanced-retrieval
+features.
 
-[ ] Candidate Explorer
+[ ] Candidate Explorer — not built as a dedicated pre-rerank-vs-post-rerank candidate browser;
+the existing results list already shows the final (post-rerank) order and every stage's score,
+but doesn't visualize the pre-rerank candidate pool separately.
 
 ---
 
 Testing
 
-[ ] Ranking Accuracy
+[x] Ranking Accuracy — `worker/tests/test_execute_retrieval.py`'s
+`test_execute_retrieval_reranking_reorders_by_relevance` verifies a real cross-encoder correctly
+promotes an exact-phrase-match chunk to rank 1 over distractor chunks a small local embedding
+model has no strong reason to rank first on its own.
 
-[ ] Model Comparison
+[x] Model Comparison — `worker/tests/test_reranking.py` exercises `cross_encoder` and
+`flashrank` (both real, no key needed) directly against the same candidate set and confirms both
+independently rank the relevant candidate first; `cohere`/`jina` have live tests too, skipped in
+this environment (no paid keys), same convention as Phase 7's cloud embedding provider tests.
 
-[ ] Latency Tests
+[ ] Latency Tests — no dedicated latency-regression test suite exists; `execute_retrieval`
+already records and persists `latency_ms` for every retrieval (unchanged from Phase 9), which
+would surface a reranking-induced slowdown in the UI, but nothing asserts an upper bound on it.
 
 ---
 
 Acceptance Criteria
 
-✓ Reranking improves precision
+[x] Reranking improves precision — verified by `test_execute_retrieval_reranking_reorders_by_relevance`
+(see Ranking Accuracy above), the concrete mechanism docs/02-architecture.md section 72 describes
+(a cross-encoder reading the full query against the full chunk text catches relevance a
+similarity-only vector comparison misses).
 
-✓ Model switching supported
+[x] Model switching supported — `reranker_provider` is a per-retrieval choice across five real
+providers (`cross_encoder`/`bge`/`flashrank`/`cohere`/`jina`), verified individually in
+`test_reranking.py` and via the factory's dispatch in `test_reranking.py::test_factory_*`.
 
-AI Eval ≥ 99
+AI Eval ≥ 99 — no automated LLM-graded eval harness exists yet (Evaluation Engine is a later
+phase, same honest gap already noted in Phases 11-12); correctness is instead verified by the
+deterministic unit and integration tests above.
 
 ---
 

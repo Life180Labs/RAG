@@ -105,6 +105,7 @@ async def get_retrieval_results(
             dense_score=result.dense_score,
             sparse_score=result.sparse_score,
             compressed_text=result.compressed_text,
+            rerank_score=result.rerank_score,
             chunk_text=chunk.text,
             chunk_heading=chunk.heading,
             chunk_page=chunk.page,

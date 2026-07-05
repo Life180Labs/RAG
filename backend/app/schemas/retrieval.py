@@ -6,6 +6,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from app.models.retrieval import (
     FusionMethod,
     QueryIntent,
+    RerankerProvider,
     RetrievalMode,
     RetrievalStatus,
     SimilarityMetric,
@@ -15,6 +16,7 @@ _DEFAULT_DENSE_WEIGHT = 0.7
 _DEFAULT_SPARSE_WEIGHT = 0.3
 _DEFAULT_RRF_K = 60
 _DEFAULT_MMR_LAMBDA = 0.7
+_DEFAULT_RERANKER_PROVIDER = RerankerProvider.CROSS_ENCODER
 
 
 class RetrievalRead(BaseModel):
@@ -43,6 +45,8 @@ class RetrievalRead(BaseModel):
     use_mmr: bool
     mmr_lambda: float | None
     compress_context: bool
+    rerank_enabled: bool
+    reranker_provider: RerankerProvider | None
     status: RetrievalStatus
     status_message: str | None
     result_count: int
@@ -64,6 +68,7 @@ class RetrievalResultRead(BaseModel):
     dense_score: float | None
     sparse_score: float | None
     compressed_text: str | None
+    rerank_score: float | None
     chunk_text: str
     chunk_heading: str | None
     chunk_page: int | None
@@ -85,11 +90,16 @@ class CreateRetrievalRequest(BaseModel):
     use_mmr: bool = False
     mmr_lambda: float | None = Field(default=None, ge=0.0, le=1.0)
     compress_context: bool = False
+    rerank_enabled: bool = False
+    reranker_provider: RerankerProvider | None = None
 
     @model_validator(mode="after")
     def _apply_hybrid_defaults(self) -> "CreateRetrievalRequest":
         if self.use_mmr and self.mmr_lambda is None:
             self.mmr_lambda = _DEFAULT_MMR_LAMBDA
+
+        if self.rerank_enabled and self.reranker_provider is None:
+            self.reranker_provider = _DEFAULT_RERANKER_PROVIDER
 
         if self.fusion_method == FusionMethod.RAG_FUSION:
             if not self.query_understanding_enabled:
