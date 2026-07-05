@@ -37,6 +37,8 @@ pytest tests/test_build_index.py -k test_name
 ```
 Worker tests hit the real dockerized Postgres/Redis/Qdrant/Chroma stack — **always run `docker compose -f docker/docker-compose.yml --env-file .env stop worker` before running worker tests or ad hoc scripts locally**, then `start worker` afterward. Otherwise the live worker container and your local process both consume the same Celery task from Redis, racing to insert the same row and producing spurious `ForeignKeyViolation` errors that look like ordering bugs but aren't.
 
+**Both `backend/tests/conftest.py` and `worker/tests/conftest.py` default `DATABASE_URL` to a dedicated `rag_test` database** (same Postgres instance/port, schema kept current via `alembic upgrade head` run against it directly — it is not migrated automatically) — **never** the `rag` database the dev stack in `docker compose up` actually runs against. Both suites' autouse per-test fixtures run a real `TRUNCATE ... CASCADE` on core tables; pointed at `rag`, this silently wipes whatever real data (accounts, uploaded documents, everything cascaded from them) happens to be sitting in the dev stack. This happened twice in one session before the dedicated database was added. If `rag_test` doesn't exist yet on a fresh machine: `CREATE DATABASE rag_test OWNER rag;` then `CREATE EXTENSION vector;` and `CREATE EXTENSION "uuid-ossp";` inside it, then `alembic upgrade head` with `DATABASE_URL` pointed at it. Never run backend and worker test suites concurrently against `rag_test` either — both truncate the same tables, and running them at the same time makes each one intermittently wipe rows the other is mid-test with.
+
 **Frontend** (`frontend/`, Next.js):
 ```bash
 npm run dev

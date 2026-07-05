@@ -4,7 +4,14 @@ import uuid
 # Exercises the real Postgres + MinIO containers from
 # docker/docker-compose.yml, same as the backend's integration tests —
 # must be set before `common.db`/`common.storage` are first imported.
-os.environ.setdefault("DATABASE_URL", "postgresql+psycopg://rag:rag@localhost:5433/rag")
+# Points at a dedicated `rag_test` database (same Postgres instance,
+# schema kept in sync via `alembic upgrade head` against it) rather
+# than the `rag` database the dev stack actually runs against — this
+# fixture's own TRUNCATE-based teardown below previously wiped real
+# data (an org, a document, its chunks/embeddings) each time these
+# tests ran against `rag`, a mistake made twice in one session before
+# this isolation was added.
+os.environ.setdefault("DATABASE_URL", "postgresql+psycopg://rag:rag@localhost:5433/rag_test")
 os.environ.setdefault("REDIS_URL", "redis://localhost:6380/0")
 os.environ.setdefault("MINIO_ENDPOINT", "localhost:9002")
 os.environ.setdefault("MINIO_ACCESS_KEY", "ragadmin")

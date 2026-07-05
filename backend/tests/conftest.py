@@ -4,7 +4,14 @@ import os
 # docker/docker-compose.yml (not sqlite/mocks) so UUID/enum/pgvector
 # behavior matches production. Must run before any `app.*` import, since
 # Settings are read (and cached) at first import.
-os.environ.setdefault("DATABASE_URL", "postgresql+asyncpg://rag:rag@localhost:5433/rag")
+# Points at a dedicated `rag_test` database (same Postgres instance,
+# schema kept in sync via `alembic upgrade head` against it) rather
+# than the `rag` database the dev stack actually runs against — the
+# `_clean_auth_tables` fixture below TRUNCATEs after every test, which
+# previously wiped real data (a user account, an org, an uploaded
+# document) each time this suite ran against `rag`, a mistake made
+# twice in one session before this isolation was added.
+os.environ.setdefault("DATABASE_URL", "postgresql+asyncpg://rag:rag@localhost:5433/rag_test")
 os.environ.setdefault("REDIS_URL", "redis://localhost:6380/0")
 os.environ.setdefault("MINIO_ENDPOINT", "localhost:9002")
 # Exposes the dev-only reset_token in /auth/forgot-password responses so
