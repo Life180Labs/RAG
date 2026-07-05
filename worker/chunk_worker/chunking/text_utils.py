@@ -33,7 +33,13 @@ def join_blocks_with_spans(blocks: list[dict]) -> tuple[str, list[dict]]:
 
     for block in blocks:
         if block["type"] in _HEADING_TYPES:
-            current_heading = block["text"]
+            # Some parsers' heading-detection heuristics (e.g. PDF font-size
+            # based) occasionally misclassify a long body paragraph as a
+            # heading-type block. Capped to fit `chunks.heading`'s
+            # VARCHAR(500) column — a "heading" longer than that isn't a
+            # real heading anyway, so truncating here (rather than at
+            # insert time) keeps every chunker's output already valid.
+            current_heading = block["text"][:500]
 
         if block["type"] in _NON_PROSE_TYPES:
             spans.append(

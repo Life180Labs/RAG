@@ -136,6 +136,68 @@ def test_chunk_document_skips_when_document_not_found():
     assert result == {"status": "skipped", "reason": "document_not_found"}
 
 
+def test_chunk_document_truncates_oversized_heading_block(document_chain):
+    # Regression test: a parser's heading-detection heuristic (e.g. PDF
+    # font-size based) can misclassify a long body paragraph as a
+    # heading-type block. Before this was fixed, that produced a
+    # `chunks.heading` value over the column's VARCHAR(500) limit, which
+    # crashed the persistence phase with `StringDataRightTruncation` — a
+    # failure that (before the except clause covered persistence too) was
+    # never surfaced to the document's status, leaving it stuck in
+    # CHUNKING forever with no user-visible error.
+    document_id = uuid.uuid4()
+    oversized_blocks = [
+        {"type": "heading", "text": "A" * 800, "level": 1, "page": None},
+        {
+            "type": "paragraph",
+            "text": "Sentence one here. Sentence two here. Sentence three here.",
+            "level": None,
+            "page": None,
+        },
+    ]
+    with SessionLocal() as session:
+        session.execute(
+            text(
+                "INSERT INTO documents (id, repository_id, filename, mime_type, size_bytes, "
+                "sha256_hash, storage_key, status, current_version, uploaded_by) "
+                "VALUES (:id, :repository_id, 'a.txt', 'text/plain', 10, 'x', 'k', "
+                "'CHUNKING', 1, :uploaded_by)"
+            ),
+            {
+                "id": document_id,
+                "repository_id": document_chain["repository_id"],
+                "uploaded_by": document_chain["user_id"],
+            },
+        )
+        session.execute(
+            text(
+                "INSERT INTO document_content (id, document_id, version, raw_text, "
+                "structured_content, parser_used, ocr_used, created_at, updated_at) "
+                "VALUES (gen_random_uuid(), :document_id, 1, 'raw', CAST(:blocks AS jsonb), "
+                "'native', false, now(), now())"
+            ),
+            {"document_id": document_id, "blocks": json.dumps(oversized_blocks)},
+        )
+        session.commit()
+
+    result = chunk_document.run(str(document_id), "paragraph")
+
+    assert result["status"] == "embedding"
+    assert _document_status(document_id) == "EMBEDDING"
+
+    with SessionLocal() as session:
+        chunk = session.execute(
+            text(
+                "SELECT heading FROM chunks c "
+                "JOIN document_chunk_sets s ON s.id = c.chunk_set_id "
+                "WHERE s.document_id = :id"
+            ),
+            {"id": document_id},
+        ).first()
+        assert chunk.heading is not None
+        assert len(chunk.heading) <= 500
+
+
 def test_chunk_document_fails_when_no_parsed_content(document_chain):
     document_id = uuid.uuid4()
     with SessionLocal() as session:
