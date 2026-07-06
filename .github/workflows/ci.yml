@@ -63,6 +63,14 @@ jobs:
             -e MINIO_ROOT_USER=ragadmin -e MINIO_ROOT_PASSWORD=ragadminsecret \
             minio/minio server /data
 
+      # docs/06-rule.md / CLAUDE.md: "tests run against real infrastructure,
+      # never mocked" — the LLM Gateway tests exercise ollama for real
+      # (it's always in the fallback chain and needs no API key), so it
+      # needs to actually be running here too. Unlike MinIO, ollama/ollama's
+      # default CMD (`ollama serve`) starts the server with no extra args.
+      - name: Start Ollama
+        run: docker run -d --name ollama -p 11434:11434 ollama/ollama
+
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
@@ -91,6 +99,28 @@ jobs:
                   time.sleep(1)
           else:
               raise SystemExit('MinIO never became ready')
+          "
+
+      - name: Wait for Ollama + pull model
+        # deepseek-r1:1.5b is the model the LLM Gateway tests request —
+        # small enough (~1.1GB) to pull fresh in CI in a reasonable time.
+        run: |
+          python -c "
+          import json, time, urllib.request
+          for _ in range(30):
+              try:
+                  urllib.request.urlopen('http://localhost:11434/api/tags', timeout=5)
+                  break
+              except Exception:
+                  time.sleep(1)
+          else:
+              raise SystemExit('Ollama never became ready')
+          req = urllib.request.Request(
+              'http://localhost:11434/api/pull',
+              data=json.dumps({'name': 'deepseek-r1:1.5b'}).encode(),
+              method='POST',
+          )
+          urllib.request.urlopen(req, timeout=300).read()
           "
 
       - name: Lint (ruff)
