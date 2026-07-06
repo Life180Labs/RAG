@@ -22,7 +22,9 @@ function formatBytes(bytes: number): string {
   return `${exponent === 0 ? value : value.toFixed(1)} ${units[exponent]}`;
 }
 
-function statusVariant(status: DocumentStatus): 'default' | 'secondary' | 'destructive' | 'outline' {
+function statusVariant(
+  status: DocumentStatus,
+): 'default' | 'secondary' | 'destructive' | 'outline' {
   if (status.startsWith('failed')) return 'destructive';
   if (status === 'ready') return 'default';
   if (status === 'validated') return 'secondary';
@@ -112,32 +114,35 @@ export function DocumentList({ repositoryId }: { repositoryId: string }) {
       )}
 
       {documents && documents.length === 0 && (
-        <p className="py-6 text-center text-sm text-muted-foreground" data-testid="document-list-empty">
+        <p
+          className="text-muted-foreground py-6 text-center text-sm"
+          data-testid="document-list-empty"
+        >
           No documents uploaded yet.
         </p>
       )}
 
       {documents && documents.length > 0 && (
         <ul
-          className="divide-y divide-border overflow-hidden rounded-lg border border-border"
+          className="divide-border border-border divide-y overflow-hidden rounded-lg border"
           data-testid="document-list"
         >
           {documents.map((doc) => (
             <li key={doc.id}>
               <div
                 className={cn(
-                  'flex items-center gap-3 bg-card px-4 py-3 text-sm transition-colors hover:bg-muted/20',
+                  'bg-card hover:bg-muted/20 flex items-center gap-3 px-4 py-3 text-sm transition-colors',
                   expandedChunksId === doc.id && 'bg-muted/10',
                 )}
               >
                 <div className="min-w-0 flex-1">
-                  <p className="truncate font-medium text-foreground">{doc.filename}</p>
-                  <p className="text-xs text-muted-foreground">
+                  <p className="text-foreground truncate font-medium">{doc.filename}</p>
+                  <p className="text-muted-foreground text-xs">
                     {formatBytes(doc.size_bytes)} · v{doc.current_version} ·{' '}
                     {new Date(doc.created_at).toLocaleDateString()}
                   </p>
                   {doc.status_message && (
-                    <p className="mt-0.5 text-xs text-destructive">{doc.status_message}</p>
+                    <p className="text-destructive mt-0.5 text-xs">{doc.status_message}</p>
                   )}
                 </div>
 
@@ -177,7 +182,7 @@ export function DocumentList({ repositoryId }: { repositoryId: string }) {
               </div>
 
               {expandedChunksId === doc.id && (
-                <div className="border-t border-border bg-background/50 p-4">
+                <div className="border-border bg-background/50 border-t p-4">
                   <ChunkExplorer documentId={doc.id} />
                 </div>
               )}

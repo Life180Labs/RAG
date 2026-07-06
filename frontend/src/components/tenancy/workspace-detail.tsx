@@ -25,8 +25,16 @@ export function WorkspaceDetail({
   organizationId: string;
   workspaceId: string;
 }) {
-  const { data: workspace, isLoading: isWorkspaceLoading, isError: isWorkspaceError } = useWorkspace(workspaceId);
-  const { data: projects, isLoading: isProjectsLoading, isError: isProjectsError } = useProjects(workspaceId);
+  const {
+    data: workspace,
+    isLoading: isWorkspaceLoading,
+    isError: isWorkspaceError,
+  } = useWorkspace(workspaceId);
+  const {
+    data: projects,
+    isLoading: isProjectsLoading,
+    isError: isProjectsError,
+  } = useProjects(workspaceId);
   const [showCreate, setShowCreate] = useState(false);
 
   if (isWorkspaceLoading) {
@@ -57,10 +65,10 @@ export function WorkspaceDetail({
       <div className="flex items-start justify-between">
         <div>
           <div className="flex items-center gap-2">
-            <h1 className="text-xl font-semibold text-foreground">{workspace.name}</h1>
+            <h1 className="text-foreground text-xl font-semibold">{workspace.name}</h1>
             <Badge variant={statusVariant(workspace.status)}>{workspace.status}</Badge>
           </div>
-          <p className="mt-0.5 text-sm text-muted-foreground">/{workspace.slug}</p>
+          <p className="text-muted-foreground mt-0.5 text-sm">/{workspace.slug}</p>
         </div>
         <Button size="sm" className="gap-1.5" onClick={() => setShowCreate((v) => !v)}>
           <Plus className="h-3.5 w-3.5" />
@@ -81,7 +89,7 @@ export function WorkspaceDetail({
 
       <Card>
         <CardHeader className="pb-3">
-          <CardTitle className="text-sm font-medium text-muted-foreground uppercase tracking-wide">
+          <CardTitle className="text-muted-foreground text-sm font-medium tracking-wide uppercase">
             Projects
           </CardTitle>
         </CardHeader>
@@ -101,9 +109,17 @@ export function WorkspaceDetail({
           )}
 
           {projects && projects.length === 0 && (
-            <div className="flex flex-col items-center justify-center py-10 text-center" data-testid="projects-empty">
-              <p className="text-sm text-muted-foreground">No projects yet.</p>
-              <Button size="sm" variant="outline" className="mt-3 gap-1.5" onClick={() => setShowCreate(true)}>
+            <div
+              className="flex flex-col items-center justify-center py-10 text-center"
+              data-testid="projects-empty"
+            >
+              <p className="text-muted-foreground text-sm">No projects yet.</p>
+              <Button
+                size="sm"
+                variant="outline"
+                className="mt-3 gap-1.5"
+                onClick={() => setShowCreate(true)}
+              >
                 <Plus className="h-3.5 w-3.5" />
                 Create project
               </Button>
@@ -111,22 +127,22 @@ export function WorkspaceDetail({
           )}
 
           {projects && projects.length > 0 && (
-            <ul className="divide-y divide-border" data-testid="projects-list">
+            <ul className="divide-border divide-y" data-testid="projects-list">
               {projects.map((project) => (
                 <li key={project.id}>
                   <Link
                     href={`/organizations/${organizationId}/workspaces/${workspaceId}/projects/${project.id}`}
-                    className="group flex items-center justify-between px-5 py-3.5 transition-colors hover:bg-muted/20"
+                    className="group hover:bg-muted/20 flex items-center justify-between px-5 py-3.5 transition-colors"
                   >
                     <div className="min-w-0">
-                      <p className="truncate text-sm font-medium text-foreground group-hover:text-primary transition-colors">
+                      <p className="text-foreground group-hover:text-primary truncate text-sm font-medium transition-colors">
                         {project.name}
                       </p>
-                      <p className="text-xs text-muted-foreground">/{project.slug}</p>
+                      <p className="text-muted-foreground text-xs">/{project.slug}</p>
                     </div>
                     <div className="ml-4 flex shrink-0 items-center gap-2">
                       <Badge variant={statusVariant(project.status)}>{project.status}</Badge>
-                      <ChevronRight className="h-4 w-4 text-muted-foreground/50 transition-transform group-hover:translate-x-0.5" />
+                      <ChevronRight className="text-muted-foreground/50 h-4 w-4 transition-transform group-hover:translate-x-0.5" />
                     </div>
                   </Link>
                 </li>

@@ -40,10 +40,10 @@ function TabButton({
     <button
       onClick={onClick}
       className={cn(
-        'flex items-center gap-2 border-b-2 px-4 py-2.5 text-sm font-medium transition-colors -mb-px',
+        '-mb-px flex items-center gap-2 border-b-2 px-4 py-2.5 text-sm font-medium transition-colors',
         active
           ? 'border-primary text-primary'
-          : 'border-transparent text-muted-foreground hover:border-border hover:text-foreground',
+          : 'text-muted-foreground hover:border-border hover:text-foreground border-transparent',
       )}
     >
       {icon}
@@ -70,17 +70,25 @@ interface StatCardProps {
 
 function StatCard({ label, value, icon }: StatCardProps) {
   return (
-    <div className="rounded-lg border border-border bg-card p-4">
+    <div className="border-border bg-card rounded-lg border p-4">
       <div className="flex items-center justify-between">
-        <p className="text-xs font-medium uppercase tracking-wider text-muted-foreground">{label}</p>
+        <p className="text-muted-foreground text-xs font-medium tracking-wider uppercase">
+          {label}
+        </p>
         <span className="text-muted-foreground/40">{icon}</span>
       </div>
-      <p className="mt-2 text-2xl font-semibold tabular-nums text-foreground">{value.toLocaleString()}</p>
+      <p className="text-foreground mt-2 text-2xl font-semibold tabular-nums">
+        {value.toLocaleString()}
+      </p>
     </div>
   );
 }
 
-function OverviewTab({ repository, activity, isActivityLoading }: {
+function OverviewTab({
+  repository,
+  activity,
+  isActivityLoading,
+}: {
   repository: Repository;
   activity: { action: string; created_at: string }[] | undefined;
   isActivityLoading: boolean;
@@ -88,15 +96,31 @@ function OverviewTab({ repository, activity, isActivityLoading }: {
   return (
     <div className="space-y-6">
       <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
-        <StatCard label="Documents" value={repository.document_count ?? 0} icon={<FileText className="h-4 w-4" />} />
-        <StatCard label="Chunks" value={repository.chunk_count ?? 0} icon={<Hash className="h-4 w-4" />} />
-        <StatCard label="Embeddings" value={repository.embedding_count ?? 0} icon={<Layers3 className="h-4 w-4" />} />
-        <StatCard label="Retrievals" value={repository.retrieval_count ?? 0} icon={<Search className="h-4 w-4" />} />
+        <StatCard
+          label="Documents"
+          value={repository.document_count ?? 0}
+          icon={<FileText className="h-4 w-4" />}
+        />
+        <StatCard
+          label="Chunks"
+          value={repository.chunk_count ?? 0}
+          icon={<Hash className="h-4 w-4" />}
+        />
+        <StatCard
+          label="Embeddings"
+          value={repository.embedding_count ?? 0}
+          icon={<Layers3 className="h-4 w-4" />}
+        />
+        <StatCard
+          label="Retrievals"
+          value={repository.retrieval_count ?? 0}
+          icon={<Search className="h-4 w-4" />}
+        />
       </div>
 
       <Card>
         <CardHeader className="pb-3">
-          <CardTitle className="text-sm font-medium text-muted-foreground uppercase tracking-wide">
+          <CardTitle className="text-muted-foreground text-sm font-medium tracking-wide uppercase">
             Activity
           </CardTitle>
         </CardHeader>
@@ -107,16 +131,19 @@ function OverviewTab({ repository, activity, isActivityLoading }: {
             </div>
           )}
           {activity && activity.length === 0 && (
-            <p className="px-5 py-4 text-sm text-muted-foreground" data-testid="repository-activity-empty">
+            <p
+              className="text-muted-foreground px-5 py-4 text-sm"
+              data-testid="repository-activity-empty"
+            >
               No activity recorded yet.
             </p>
           )}
           {activity && activity.length > 0 && (
-            <ul className="divide-y divide-border" data-testid="repository-activity-list">
+            <ul className="divide-border divide-y" data-testid="repository-activity-list">
               {activity.map((entry, index) => (
                 <li key={index} className="flex items-center justify-between px-5 py-3">
-                  <span className="text-sm text-foreground">{entry.action}</span>
-                  <span className="text-xs text-muted-foreground">
+                  <span className="text-foreground text-sm">{entry.action}</span>
+                  <span className="text-muted-foreground text-xs">
                     {new Date(entry.created_at).toLocaleString()}
                   </span>
                 </li>
@@ -143,7 +170,7 @@ function DocumentsTab({ repositoryId }: { repositoryId: string }) {
 
       <Card>
         <CardHeader className="pb-3">
-          <CardTitle className="text-sm font-medium text-muted-foreground uppercase tracking-wide">
+          <CardTitle className="text-muted-foreground text-sm font-medium tracking-wide uppercase">
             Documents
           </CardTitle>
         </CardHeader>
@@ -160,7 +187,7 @@ function SettingsTab({ repository }: { repository: Repository }) {
     <Card>
       <CardHeader className="pb-3">
         <CardTitle className="text-sm font-medium">Pipeline defaults</CardTitle>
-        <p className="text-xs text-muted-foreground mt-1">
+        <p className="text-muted-foreground mt-1 text-xs">
           Default configuration applied when creating chunks, embeddings, and retrievals.
         </p>
       </CardHeader>
@@ -218,16 +245,16 @@ export function RepositoryDashboard({
       <div className="flex items-start justify-between">
         <div>
           <div className="flex items-center gap-2">
-            <Boxes className="h-5 w-5 text-muted-foreground" />
-            <h1 className="text-xl font-semibold text-foreground">{repository.name}</h1>
+            <Boxes className="text-muted-foreground h-5 w-5" />
+            <h1 className="text-foreground text-xl font-semibold">{repository.name}</h1>
             <Badge variant={statusVariant(repository.status)}>{repository.status}</Badge>
           </div>
-          <p className="mt-0.5 text-sm text-muted-foreground">/{repository.slug}</p>
+          <p className="text-muted-foreground mt-0.5 text-sm">/{repository.slug}</p>
         </div>
       </div>
 
       {/* Tab bar */}
-      <div className="flex gap-1 border-b border-border" data-testid="repository-tabs">
+      <div className="border-border flex gap-1 border-b" data-testid="repository-tabs">
         <TabButton
           label="Overview"
           icon={<BarChart3 className="h-3.5 w-3.5" />}

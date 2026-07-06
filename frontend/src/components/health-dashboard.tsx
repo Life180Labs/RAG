@@ -15,7 +15,7 @@ export function HealthDashboard() {
   return (
     <Card className="border-border">
       <CardHeader className="pb-2">
-        <CardTitle className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+        <CardTitle className="text-muted-foreground text-xs font-semibold tracking-wider uppercase">
           API Status
         </CardTitle>
       </CardHeader>
@@ -46,10 +46,13 @@ export function HealthDashboard() {
               )}
             />
             <div className="flex-1">
-              <p className="text-sm font-medium text-foreground capitalize">{data.status}</p>
-              <p className="text-xs text-muted-foreground">{data.environment}</p>
+              <p className="text-foreground text-sm font-medium capitalize">{data.status}</p>
+              <p className="text-muted-foreground text-xs">{data.environment}</p>
             </div>
-            <Badge variant={data.status === 'healthy' ? 'default' : 'destructive'} className="text-[0.7rem]">
+            <Badge
+              variant={data.status === 'healthy' ? 'default' : 'destructive'}
+              className="text-[0.7rem]"
+            >
               {data.status}
             </Badge>
           </div>

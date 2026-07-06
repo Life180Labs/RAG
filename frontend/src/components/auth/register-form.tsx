@@ -46,10 +46,10 @@ export function RegisterForm() {
   }
 
   return (
-    <Card className="w-full max-w-sm border-border/60">
+    <Card className="border-border/60 w-full max-w-sm">
       <CardHeader className="pb-4 text-center">
-        <h1 className="text-base font-semibold text-foreground">Create your account</h1>
-        <p className="text-xs text-muted-foreground">Get started with RAG Studio</p>
+        <h1 className="text-foreground text-base font-semibold">Create your account</h1>
+        <p className="text-muted-foreground text-xs">Get started with RAG Studio</p>
       </CardHeader>
       <CardContent>
         <form className="space-y-4" onSubmit={handleSubmit}>
@@ -95,9 +95,9 @@ export function RegisterForm() {
               onChange={(e) => setPassword(e.target.value)}
             />
             {passwordError ? (
-              <p className="text-xs text-destructive">{passwordError}</p>
+              <p className="text-destructive text-xs">{passwordError}</p>
             ) : (
-              <p className="text-xs text-muted-foreground">
+              <p className="text-muted-foreground text-xs">
                 12+ characters with upper, lower, digit, and special character.
               </p>
             )}
@@ -107,7 +107,7 @@ export function RegisterForm() {
             {isSubmitting ? 'Creating account…' : 'Create account'}
           </Button>
 
-          <p className="text-center text-xs text-muted-foreground">
+          <p className="text-muted-foreground text-center text-xs">
             Already have an account?{' '}
             <Link href="/login" className="text-primary hover:underline">
               Sign in

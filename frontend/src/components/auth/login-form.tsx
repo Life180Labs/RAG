@@ -28,17 +28,21 @@ export function LoginForm() {
       await login(email, password);
       router.push('/profile');
     } catch (err) {
-      setError(err instanceof ApiRequestError ? err.message : 'Unable to sign in. Check your credentials.');
+      setError(
+        err instanceof ApiRequestError ? err.message : 'Unable to sign in. Check your credentials.',
+      );
     } finally {
       setIsSubmitting(false);
     }
   }
 
   return (
-    <Card className="w-full max-w-sm border-border/60">
+    <Card className="border-border/60 w-full max-w-sm">
       <CardHeader className="pb-4 text-center">
-        <h1 className="text-base font-semibold text-foreground">Sign in</h1>
-        <p className="text-xs text-muted-foreground">Enter your credentials to access the platform</p>
+        <h1 className="text-foreground text-base font-semibold">Sign in</h1>
+        <p className="text-muted-foreground text-xs">
+          Enter your credentials to access the platform
+        </p>
       </CardHeader>
       <CardContent>
         <form className="space-y-4" onSubmit={handleSubmit}>
@@ -66,7 +70,7 @@ export function LoginForm() {
               <Label htmlFor="password">Password</Label>
               <Link
                 href="/forgot-password"
-                className="text-xs text-muted-foreground transition-colors hover:text-primary"
+                className="text-muted-foreground hover:text-primary text-xs transition-colors"
               >
                 Forgot password?
               </Link>
@@ -85,7 +89,7 @@ export function LoginForm() {
             {isSubmitting ? 'Signing in…' : 'Sign in'}
           </Button>
 
-          <p className="text-center text-xs text-muted-foreground">
+          <p className="text-muted-foreground text-center text-xs">
             Don&apos;t have an account?{' '}
             <Link href="/register" className="text-primary hover:underline">
               Create one

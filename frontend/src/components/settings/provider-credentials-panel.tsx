@@ -95,11 +95,11 @@ export function ProviderCredentialsPanel({ organizationId }: { organizationId: s
     <div className="w-full max-w-3xl space-y-6">
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-xl font-semibold text-foreground">Settings</h1>
-          <p className="mt-0.5 text-sm text-muted-foreground">
-            Configure this organization&apos;s LLM, embedding, reranking, and vector-index
-            provider API keys. Configured keys take precedence over the platform&apos;s default
-            keys for every request made on behalf of this organization.
+          <h1 className="text-foreground text-xl font-semibold">Settings</h1>
+          <p className="text-muted-foreground mt-0.5 text-sm">
+            Configure this organization&apos;s LLM, embedding, reranking, and vector-index provider
+            API keys. Configured keys take precedence over the platform&apos;s default keys for
+            every request made on behalf of this organization.
           </p>
         </div>
         <Button size="sm" onClick={() => setShowAdd((v) => !v)} className="gap-1.5">
@@ -124,7 +124,7 @@ export function ProviderCredentialsPanel({ organizationId }: { organizationId: s
 
       <Card>
         <CardHeader className="pb-3">
-          <CardTitle className="text-sm font-medium text-muted-foreground uppercase tracking-wide">
+          <CardTitle className="text-muted-foreground text-sm font-medium tracking-wide uppercase">
             Provider API keys
           </CardTitle>
         </CardHeader>
@@ -152,8 +152,8 @@ export function ProviderCredentialsPanel({ organizationId }: { organizationId: s
               className="flex flex-col items-center justify-center py-12 text-center"
               data-testid="provider-credentials-empty"
             >
-              <p className="text-sm font-medium text-foreground">No provider keys configured</p>
-              <p className="mt-1 text-xs text-muted-foreground">
+              <p className="text-foreground text-sm font-medium">No provider keys configured</p>
+              <p className="text-muted-foreground mt-1 text-xs">
                 Without a key, requests fall back to the platform&apos;s default keys, if any.
               </p>
               <Button
@@ -169,22 +169,19 @@ export function ProviderCredentialsPanel({ organizationId }: { organizationId: s
           )}
 
           {credentials && credentials.length > 0 && (
-            <ul className="divide-y divide-border" data-testid="provider-credentials-list">
+            <ul className="divide-border divide-y" data-testid="provider-credentials-list">
               {credentials.map((credential) => (
-                <li
-                  key={credential.id}
-                  className="flex items-center justify-between px-5 py-3.5"
-                >
+                <li key={credential.id} className="flex items-center justify-between px-5 py-3.5">
                   <div className="flex min-w-0 items-center gap-3">
-                    <KeyRound className="h-4 w-4 shrink-0 text-muted-foreground/50" />
+                    <KeyRound className="text-muted-foreground/50 h-4 w-4 shrink-0" />
                     <div className="min-w-0">
                       <div className="flex items-center gap-2">
-                        <p className="truncate text-sm font-medium text-foreground">
+                        <p className="text-foreground truncate text-sm font-medium">
                           {credential.provider}
                         </p>
                         <Badge variant="secondary">•••• {credential.last_four}</Badge>
                       </div>
-                      <p className="text-xs text-muted-foreground">
+                      <p className="text-muted-foreground text-xs">
                         Updated {new Date(credential.updated_at).toLocaleString()}
                       </p>
                     </div>

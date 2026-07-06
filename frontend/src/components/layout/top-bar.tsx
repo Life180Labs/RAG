@@ -63,19 +63,17 @@ export function TopBar() {
   if (breadcrumbs.length === 0) return null;
 
   return (
-    <header className="flex h-11 shrink-0 items-center border-b border-border bg-background/80 px-6 backdrop-blur-sm">
+    <header className="border-border bg-background/80 flex h-11 shrink-0 items-center border-b px-6 backdrop-blur-sm">
       <nav className="flex items-center gap-1.5 text-sm" aria-label="Breadcrumb">
         {breadcrumbs.map((crumb, i) => (
           <Fragment key={crumb.href}>
-            {i > 0 && (
-              <ChevronRight className="h-3.5 w-3.5 shrink-0 text-muted-foreground/40" />
-            )}
+            {i > 0 && <ChevronRight className="text-muted-foreground/40 h-3.5 w-3.5 shrink-0" />}
             {i === breadcrumbs.length - 1 ? (
-              <span className="font-medium text-foreground">{crumb.label}</span>
+              <span className="text-foreground font-medium">{crumb.label}</span>
             ) : (
               <Link
                 href={crumb.href}
-                className="text-muted-foreground transition-colors hover:text-foreground"
+                className="text-muted-foreground hover:text-foreground transition-colors"
               >
                 {crumb.label}
               </Link>
