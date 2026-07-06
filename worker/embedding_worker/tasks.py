@@ -24,10 +24,12 @@ from datetime import UTC, datetime
 from sqlalchemy import text
 
 from common.celery_app import celery_app
+from common.credentials import get_org_credential
 from common.db import SessionLocal
 from common.embedding_providers.base import ProviderNotConfiguredError
 from common.embedding_providers.factory import DEFAULT_PROVIDER, default_model, get_provider
 from common.logging import get_logger
+from common.org_resolution import resolve_organization_id
 
 logger = get_logger(__name__)
 
@@ -131,8 +133,15 @@ def embed_chunk_set(
         next_version = (old_version_row.version + 1) if old_version_row is not None else 1
         old_embedding_count = old_version_row.embedding_count if old_version_row is not None else 0
 
+        organization_id = resolve_organization_id(session, document_id)
+        api_key_override = (
+            get_org_credential(session, organization_id, resolved_provider)
+            if organization_id
+            else None
+        )
+
         try:
-            embedder = get_provider(resolved_provider, resolved_model)
+            embedder = get_provider(resolved_provider, resolved_model, api_key_override)
         except ProviderNotConfiguredError as exc:
             message = str(exc)
             _upsert_embedding_version(

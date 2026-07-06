@@ -2966,6 +2966,34 @@ Response
 
 ---
 
+# 82a. Per-Organization Provider Credential Override (addendum, no dedicated
+section number in the original TOC — added out-of-plan, same convention as
+docs/03-database.md's Semantic Cache Schema addendum)
+
+Every provider factory (`backend/app/core/llm/factory.py`'s `get_provider`, `common.embedding_providers.factory`,
+`index_worker.providers.factory`, `retrieval_worker.reranking.factory`) takes an optional
+`api_key_override` — when present, it's used instead of the platform-wide env-var default from
+`Settings`/`WorkerSettings`. `LLMGateway.generate`/`stream` take a `credential_overrides: dict[str, str]`
+(provider name -> key) and forward the relevant entry into `get_provider` on every fallback attempt.
+
+The override is resolved once per request, at the point closest to the caller that already knows
+the tenant: `LLMService.create_completion` and `ConversationService.send_message` resolve
+`organization_id` from the `document_id` already in scope (`DocumentRepository.get_organization_id`,
+walking `Document -> Repository -> Project -> Workspace -> Organization`), then call
+`ProviderCredentialService.get_llm_overrides(organization_id)` to build the dict — empty when the
+org hasn't configured anything, which is indistinguishable from this feature not existing (every
+provider falls back to its env-var default exactly as it did before). The worker side resolves
+the same way per Celery task (`common.org_resolution.resolve_organization_id` +
+`common.credentials.get_org_credential`, both raw SQL — the worker never imports backend ORM
+models), keyed off whatever `document_id` that task already has in scope
+(`embedding_worker.embed_chunk_set`, `index_worker.build_index`/`delete_index`,
+`retrieval_worker`'s reranking step).
+
+See docs/03-database.md section 28 for the `provider_credentials` table and docs/04-api-spec.md
+section 25 for the API this override reads from.
+
+---
+
 # 83. Provider Adapter Pattern
 
 Every provider implements identical interface.

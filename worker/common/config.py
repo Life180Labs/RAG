@@ -56,6 +56,11 @@ class WorkerSettings(BaseSettings):
     # each other's config module.
     retrieval_cache_ttl_seconds: int = 3600
 
+    # Must match backend/app/core/config.py's Settings.credential_encryption_key
+    # exactly — both services decrypt provider_credentials.encrypted_key
+    # independently with the same Fernet key, never by calling each other.
+    credential_encryption_key: str = "A" * 43 + "="
+
 
 @lru_cache
 def get_worker_settings() -> WorkerSettings:

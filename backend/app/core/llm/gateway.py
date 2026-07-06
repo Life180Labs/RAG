@@ -85,6 +85,7 @@ class LLMGateway:
         provider: str | None = None,
         model: str | None = None,
         options: ProviderRequestOptions | None = None,
+        credential_overrides: dict[str, str] | None = None,
     ) -> tuple[CompletionResult, str, str, list[AttemptRecord]]:
         options = options or ProviderRequestOptions()
         spec = select_model(
@@ -94,7 +95,9 @@ class LLMGateway:
 
         for provider_name in _build_fallback_order(spec.provider):
             model_name = _model_for_provider(provider_name, spec.provider, spec.model)
-            llm_provider = get_provider(provider_name)
+            llm_provider = get_provider(
+                provider_name, (credential_overrides or {}).get(provider_name)
+            )
 
             for attempt_index in range(MAX_ATTEMPTS_PER_PROVIDER):
                 try:
@@ -124,6 +127,7 @@ class LLMGateway:
         provider: str | None = None,
         model: str | None = None,
         options: ProviderRequestOptions | None = None,
+        credential_overrides: dict[str, str] | None = None,
     ) -> AsyncIterator[tuple[StreamChunk, str, str, list[AttemptRecord]]]:
         """Yields `(chunk, provider_used, model_used, attempts)`. Fallback
         only happens before the first content chunk is yielded — once the
@@ -139,7 +143,9 @@ class LLMGateway:
 
         for provider_name in _build_fallback_order(spec.provider):
             model_name = _model_for_provider(provider_name, spec.provider, spec.model)
-            llm_provider = get_provider(provider_name)
+            llm_provider = get_provider(
+                provider_name, (credential_overrides or {}).get(provider_name)
+            )
 
             for attempt_index in range(MAX_ATTEMPTS_PER_PROVIDER):
                 try:

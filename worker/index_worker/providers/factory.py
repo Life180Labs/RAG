@@ -21,7 +21,9 @@ DEFAULT_INDEX_TYPE = "hnsw"
 _KNOWN_PROVIDERS = {"pgvector", "qdrant", "chroma", "pinecone"}
 
 
-def get_provider(provider: str, session: Session) -> VectorIndexProvider:
+def get_provider(
+    provider: str, session: Session, api_key_override: str | None = None
+) -> VectorIndexProvider:
     if provider not in _KNOWN_PROVIDERS:
         raise ValueError(f"Unknown vector index provider '{provider}'.")
 
@@ -33,4 +35,4 @@ def get_provider(provider: str, session: Session) -> VectorIndexProvider:
         return QdrantProvider(settings.qdrant_url)
     if provider == "chroma":
         return ChromaProvider(settings.chroma_url)
-    return PineconeProvider(settings.pinecone_api_key)
+    return PineconeProvider(api_key_override or settings.pinecone_api_key)

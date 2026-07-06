@@ -118,7 +118,7 @@ def gateway():
 async def test_gateway_generate_succeeds_on_first_provider(gateway, monkeypatch):
     result_obj = CompletionResult(text="hi", input_tokens=1, output_tokens=1)
     stub = _StubProvider("openai", [result_obj])
-    monkeypatch.setattr("app.core.llm.gateway.get_provider", lambda name: stub)
+    monkeypatch.setattr("app.core.llm.gateway.get_provider", lambda name, api_key_override=None: stub)
 
     result, provider_used, model_used, attempts = await gateway.generate(
         [LLMMessage(role="user", content="hi")], provider="openai", model="gpt-4o-mini"
@@ -135,7 +135,7 @@ async def test_gateway_retries_transient_error_then_succeeds(gateway, monkeypatc
     stub = _StubProvider(
         "openai", [TransientProviderError("timeout", provider="openai"), result_obj]
     )
-    monkeypatch.setattr("app.core.llm.gateway.get_provider", lambda name: stub)
+    monkeypatch.setattr("app.core.llm.gateway.get_provider", lambda name, api_key_override=None: stub)
     monkeypatch.setattr("app.core.llm.gateway.RETRY_BACKOFF_SECONDS", 0.0)
 
     result, provider_used, _, attempts = await gateway.generate(
@@ -150,7 +150,7 @@ async def test_gateway_retries_transient_error_then_succeeds(gateway, monkeypatc
 async def test_gateway_invalid_request_raises_immediately_no_fallback(gateway, monkeypatch):
     stubs: dict[str, _StubProvider] = {}
 
-    def _get(name):
+    def _get(name, api_key_override=None):
         stubs.setdefault(name, _StubProvider(name, [InvalidRequestError("bad", provider=name)]))
         return stubs[name]
 
@@ -173,7 +173,7 @@ async def test_gateway_not_configured_skips_to_next_provider(gateway, monkeypatc
         ),
         "anthropic": _StubProvider("anthropic", [result_obj]),
     }
-    monkeypatch.setattr("app.core.llm.gateway.get_provider", lambda name: stubs[name])
+    monkeypatch.setattr("app.core.llm.gateway.get_provider", lambda name, api_key_override=None: stubs[name])
     monkeypatch.setattr(
         "app.core.llm.gateway.DEFAULT_FALLBACK_ORDER", ["openai", "anthropic"]
     )
@@ -196,7 +196,7 @@ async def test_gateway_all_providers_failed_records_every_attempt(gateway, monke
         name: _StubProvider(name, [ProviderAuthError("bad creds", provider=name)])
         for name in ["openai", "anthropic"]
     }
-    monkeypatch.setattr("app.core.llm.gateway.get_provider", lambda name: stubs[name])
+    monkeypatch.setattr("app.core.llm.gateway.get_provider", lambda name, api_key_override=None: stubs[name])
     monkeypatch.setattr(
         "app.core.llm.gateway.DEFAULT_FALLBACK_ORDER", ["openai", "anthropic"]
     )
@@ -214,7 +214,7 @@ async def test_gateway_stream_yields_chunks_and_stops_fallback_after_first_chunk
 ):
     chunks = [StreamChunk(delta_text="hel"), StreamChunk(delta_text="lo", done=True)]
     stub = _StubProvider("openai", [chunks])
-    monkeypatch.setattr("app.core.llm.gateway.get_provider", lambda name: stub)
+    monkeypatch.setattr("app.core.llm.gateway.get_provider", lambda name, api_key_override=None: stub)
 
     collected = []
     async for chunk, provider_used, model_used, attempts in gateway.stream(  # noqa: B007

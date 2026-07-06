@@ -69,6 +69,17 @@ class Settings(BaseSettings):
     # same shape of gap as an unset cloud API key.
     ollama_base_url: str = "http://localhost:11434"
 
+    # Per-organization provider credentials — symmetric key (Fernet) used to
+    # encrypt/decrypt provider_credentials.encrypted_key at rest. Must be set
+    # identically here and in worker/common/config.py's WorkerSettings (both
+    # services decrypt independently — same "shared secret across services"
+    # precedent as DATABASE_URL/REDIS_URL pointing at the same infra), or the
+    # worker won't be able to decrypt what the backend encrypted. The dev
+    # default below is a valid but insecure all-zero Fernet key — change it
+    # in production the same way jwt_secret_key must be changed. Generate a
+    # real one with `Fernet.generate_key()`.
+    credential_encryption_key: str = "A" * 43 + "="
+
     # Caching (Phase 17, docs/02-architecture.md sections 99-102/148) —
     # TTLs are configurable per docs/02-architecture.md section 148.
     cache_enabled: bool = True

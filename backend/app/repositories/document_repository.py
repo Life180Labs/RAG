@@ -3,11 +3,28 @@ import uuid
 from sqlalchemy import select
 
 from app.models.document import Document, DocumentVersion, UploadSession
+from app.models.project import Project
+from app.models.repository import Repository
+from app.models.workspace import Workspace
 from app.repositories.base import BaseRepository
 
 
 class DocumentRepository(BaseRepository[Document]):
     model = Document
+
+    async def get_organization_id(self, document_id: uuid.UUID) -> uuid.UUID | None:
+        """Resolves a document's organization via the tenancy FK chain
+        (Document -> Repository -> Project -> Workspace -> Organization) —
+        used to look up org-scoped provider credential overrides without
+        loading the full ORM object graph."""
+        result = await self.session.execute(
+            select(Workspace.organization_id)
+            .join(Project, Project.workspace_id == Workspace.id)
+            .join(Repository, Repository.project_id == Project.id)
+            .join(Document, Document.repository_id == Repository.id)
+            .where(Document.id == document_id)
+        )
+        return result.scalar_one_or_none()
 
     async def get_active_by_id(self, id_: uuid.UUID) -> Document | None:
         result = await self.session.execute(

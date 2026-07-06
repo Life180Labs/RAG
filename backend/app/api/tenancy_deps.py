@@ -38,12 +38,14 @@ from app.repositories.membership_repository import (
 )
 from app.repositories.organization_repository import OrganizationRepository
 from app.repositories.project_repository import ProjectRepository
+from app.repositories.provider_credential_repository import ProviderCredentialRepository
 from app.repositories.repository_repository import RepositoryRepository
 from app.repositories.user_repository import UserRepository
 from app.repositories.workspace_repository import WorkspaceRepository
 from app.services.invitation_service import InvitationService
 from app.services.organization_service import OrganizationService
 from app.services.project_service import ProjectService
+from app.services.provider_credential_service import ProviderCredentialService
 from app.services.repository_service import RepositoryService
 from app.services.workspace_service import WorkspaceService
 
@@ -219,6 +221,21 @@ def get_invitation_service(
     return InvitationService(
         invitation_repository, member_repository, user_repository, audit_log_repository
     )
+
+
+def get_provider_credential_repository(
+    db: AsyncSession = Depends(get_db),
+) -> ProviderCredentialRepository:
+    return ProviderCredentialRepository(db)
+
+
+def get_provider_credential_service(
+    provider_credential_repository: ProviderCredentialRepository = Depends(
+        get_provider_credential_repository
+    ),
+    audit_log_repository: AuditLogRepository = Depends(get_audit_log_repository),
+) -> ProviderCredentialService:
+    return ProviderCredentialService(provider_credential_repository, audit_log_repository)
 
 
 def get_repository_service(

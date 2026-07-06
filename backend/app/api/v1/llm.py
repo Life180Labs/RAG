@@ -53,8 +53,10 @@ from app.db.session import get_db
 from app.models.llm_request import LLMRequest, LLMRequestStatus
 from app.models.membership import MemberRole, role_meets_minimum
 from app.models.user import User
+from app.repositories.document_repository import DocumentRepository
 from app.repositories.llm_request_repository import LLMRequestRepository
 from app.repositories.membership_repository import RepositoryMemberRepository
+from app.repositories.provider_credential_repository import ProviderCredentialRepository
 from app.repositories.user_repository import UserRepository
 from app.schemas.common import SuccessResponse
 from app.schemas.llm import (
@@ -65,6 +67,7 @@ from app.schemas.llm import (
 )
 from app.services.llm_service import LLMService
 from app.services.prompt_service import PromptService
+from app.services.provider_credential_service import ProviderCredentialService
 from app.services.retrieval_service import RetrievalService
 
 router = APIRouter(tags=["llm"])
@@ -181,7 +184,11 @@ def _build_llm_service(db: AsyncSession) -> LLMService:
         get_audit_log_repository(db),
     )
     return LLMService(
-        LLMRequestRepository(db), prompt_service, get_audit_log_repository(db)
+        LLMRequestRepository(db),
+        prompt_service,
+        get_audit_log_repository(db),
+        DocumentRepository(db),
+        ProviderCredentialService(ProviderCredentialRepository(db), get_audit_log_repository(db)),
     )
 
 
@@ -257,6 +264,10 @@ async def stream_completion(
     gateway = LLMGateway()
     messages = [LLMMessage(role="user", content=prompt.rendered_prompt or "")]
     options = ProviderRequestOptions(json_mode=payload.json_mode)
+    organization_id = await DocumentRepository(db).get_organization_id(document.id)
+    credential_overrides = await ProviderCredentialService(
+        ProviderCredentialRepository(db), get_audit_log_repository(db)
+    ).get_llm_overrides(organization_id)
     output_text = ""
     started_at = time.monotonic()
     try:
@@ -266,6 +277,7 @@ async def stream_completion(
             provider=payload.provider,
             model=payload.model,
             options=options,
+            credential_overrides=credential_overrides,
         ):
             if chunk.delta_text:
                 output_text += chunk.delta_text
@@ -280,7 +292,9 @@ async def stream_completion(
                 llm_request.attempted_providers = [asdict(a) for a in attempts]
                 llm_request.status = LLMRequestStatus.COMPLETED
                 try:
-                    cost = get_provider(provider_used).cost_estimate(
+                    cost = get_provider(
+                        provider_used, credential_overrides.get(provider_used)
+                    ).cost_estimate(
                         llm_request.input_tokens, llm_request.output_tokens, model_used
                     )
                     llm_request.cost_usd = cost.total_usd

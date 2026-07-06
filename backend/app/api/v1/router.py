@@ -17,6 +17,7 @@ from app.api.v1 import (
     organizations,
     projects,
     prompts,
+    provider_credentials,
     repositories,
     retrievals,
     users,
@@ -41,4 +42,5 @@ api_router.include_router(prompts.router)
 api_router.include_router(llm.router)
 api_router.include_router(conversations.router)
 api_router.include_router(invitations.router)
+api_router.include_router(provider_credentials.router)
 api_router.include_router(cache.router)

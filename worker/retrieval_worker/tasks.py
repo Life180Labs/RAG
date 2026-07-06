@@ -91,9 +91,11 @@ from sqlalchemy import text
 
 from common import cache
 from common.celery_app import celery_app
+from common.credentials import get_org_credential
 from common.db import SessionLocal
 from common.embedding_providers.factory import get_provider as get_embedding_provider
 from common.logging import get_logger
+from common.org_resolution import resolve_organization_id
 from index_worker.providers.base import UnsupportedMetricError
 from index_worker.providers.factory import get_provider as get_index_provider
 from retrieval_worker import bm25, compression, fusion, mmr, parent_expansion
@@ -352,7 +354,14 @@ def _compute_retrieval(
             if r["chunk_id"] in chunk_text_by_id
         ]
         try:
-            reranker = reranking_factory.get_provider(row.reranker_provider.lower())
+            rerank_provider_name = row.reranker_provider.lower()
+            organization_id = resolve_organization_id(session, str(row.document_id))
+            api_key_override = (
+                get_org_credential(session, organization_id, rerank_provider_name)
+                if organization_id
+                else None
+            )
+            reranker = reranking_factory.get_provider(rerank_provider_name, api_key_override)
             rerank_hits = reranker.rerank(row.query_text, candidates)
         except Exception as exc:
             message = f"Reranking failed: {exc}"[:500]
