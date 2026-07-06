@@ -22,7 +22,12 @@ export function ProfileView() {
   if (!user) return null;
 
   const initials = user.full_name
-    ? user.full_name.split(' ').map((n) => n[0]).join('').toUpperCase().slice(0, 2)
+    ? user.full_name
+        .split(' ')
+        .map((n) => n[0])
+        .join('')
+        .toUpperCase()
+        .slice(0, 2)
     : user.email.slice(0, 2).toUpperCase();
 
   async function handleSubmit(e: React.FormEvent) {
@@ -44,12 +49,12 @@ export function ProfileView() {
   return (
     <div className="w-full max-w-md space-y-4">
       <div className="flex items-center gap-4">
-        <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-primary/20 text-sm font-semibold text-primary">
+        <div className="bg-primary/20 text-primary flex h-12 w-12 shrink-0 items-center justify-center rounded-full text-sm font-semibold">
           {initials}
         </div>
         <div>
-          <p className="font-semibold text-foreground">{user.full_name || user.email}</p>
-          <p className="text-sm text-muted-foreground">{user.email}</p>
+          <p className="text-foreground font-semibold">{user.full_name || user.email}</p>
+          <p className="text-muted-foreground text-sm">{user.email}</p>
         </div>
         <Badge variant="secondary" className="ml-auto">
           {user.role}
@@ -61,14 +66,16 @@ export function ProfileView() {
           <CardTitle className="text-sm font-medium">Account details</CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
-          <dl className="text-sm divide-y divide-border">
+          <dl className="divide-border divide-y text-sm">
             <div className="flex justify-between py-2.5">
               <dt className="text-muted-foreground">Email</dt>
-              <dd className="font-medium text-foreground">{user.email}</dd>
+              <dd className="text-foreground font-medium">{user.email}</dd>
             </div>
             <div className="flex justify-between py-2.5">
               <dt className="text-muted-foreground">Member since</dt>
-              <dd className="font-medium text-foreground">{new Date(user.created_at).toLocaleDateString()}</dd>
+              <dd className="text-foreground font-medium">
+                {new Date(user.created_at).toLocaleDateString()}
+              </dd>
             </div>
           </dl>
 

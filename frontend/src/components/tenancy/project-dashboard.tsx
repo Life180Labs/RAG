@@ -34,7 +34,11 @@ export function ProjectDashboard({
   projectId: string;
 }) {
   const { data: project, isLoading, isError } = useProject(projectId);
-  const { data: repositories, isLoading: isRepositoriesLoading, isError: isRepositoriesError } = useRepositories(projectId);
+  const {
+    data: repositories,
+    isLoading: isRepositoriesLoading,
+    isError: isRepositoriesError,
+  } = useRepositories(projectId);
   const queryClient = useQueryClient();
   const [name, setName] = useState('');
   const [error, setError] = useState<string | null>(null);
@@ -58,7 +62,10 @@ export function ProjectDashboard({
         <AlertTitle>Couldn&apos;t load this project</AlertTitle>
         <AlertDescription>
           You may not have access, or it doesn&apos;t exist.{' '}
-          <Link href={`/organizations/${organizationId}/workspaces/${workspaceId}`} className="underline">
+          <Link
+            href={`/organizations/${organizationId}/workspaces/${workspaceId}`}
+            className="underline"
+          >
             Back to workspace
           </Link>
         </AlertDescription>
@@ -88,13 +95,18 @@ export function ProjectDashboard({
       <div className="flex items-start justify-between">
         <div>
           <div className="flex items-center gap-2">
-            <h1 className="text-xl font-semibold text-foreground">{project.name}</h1>
+            <h1 className="text-foreground text-xl font-semibold">{project.name}</h1>
             <Badge variant={statusVariant(project.status)}>{project.status}</Badge>
           </div>
-          <p className="mt-0.5 text-sm text-muted-foreground">/{project.slug}</p>
+          <p className="text-muted-foreground mt-0.5 text-sm">/{project.slug}</p>
         </div>
         <div className="flex gap-2">
-          <Button size="sm" variant="outline" className="gap-1.5" onClick={() => setShowRename((v) => !v)}>
+          <Button
+            size="sm"
+            variant="outline"
+            className="gap-1.5"
+            onClick={() => setShowRename((v) => !v)}
+          >
             <Pencil className="h-3.5 w-3.5" />
             Rename
           </Button>
@@ -154,7 +166,7 @@ export function ProjectDashboard({
 
       <Card>
         <CardHeader className="pb-3">
-          <CardTitle className="text-sm font-medium text-muted-foreground uppercase tracking-wide">
+          <CardTitle className="text-muted-foreground text-sm font-medium tracking-wide uppercase">
             Repositories
           </CardTitle>
         </CardHeader>
@@ -174,9 +186,17 @@ export function ProjectDashboard({
           )}
 
           {repositories && repositories.length === 0 && (
-            <div className="flex flex-col items-center justify-center py-10 text-center" data-testid="repositories-empty">
-              <p className="text-sm text-muted-foreground">No repositories yet.</p>
-              <Button size="sm" variant="outline" className="mt-3 gap-1.5" onClick={() => setShowCreate(true)}>
+            <div
+              className="flex flex-col items-center justify-center py-10 text-center"
+              data-testid="repositories-empty"
+            >
+              <p className="text-muted-foreground text-sm">No repositories yet.</p>
+              <Button
+                size="sm"
+                variant="outline"
+                className="mt-3 gap-1.5"
+                onClick={() => setShowCreate(true)}
+              >
                 <Plus className="h-3.5 w-3.5" />
                 Create repository
               </Button>
@@ -184,22 +204,22 @@ export function ProjectDashboard({
           )}
 
           {repositories && repositories.length > 0 && (
-            <ul className="divide-y divide-border" data-testid="repositories-list">
+            <ul className="divide-border divide-y" data-testid="repositories-list">
               {repositories.map((repository) => (
                 <li key={repository.id}>
                   <Link
                     href={`/organizations/${organizationId}/workspaces/${workspaceId}/projects/${projectId}/repositories/${repository.id}`}
-                    className="group flex items-center justify-between px-5 py-3.5 transition-colors hover:bg-muted/20"
+                    className="group hover:bg-muted/20 flex items-center justify-between px-5 py-3.5 transition-colors"
                   >
                     <div className="min-w-0">
-                      <p className="truncate text-sm font-medium text-foreground group-hover:text-primary transition-colors">
+                      <p className="text-foreground group-hover:text-primary truncate text-sm font-medium transition-colors">
                         {repository.name}
                       </p>
-                      <p className="text-xs text-muted-foreground">/{repository.slug}</p>
+                      <p className="text-muted-foreground text-xs">/{repository.slug}</p>
                     </div>
                     <div className="ml-4 flex shrink-0 items-center gap-2">
                       <Badge variant={statusVariant(repository.status)}>{repository.status}</Badge>
-                      <ChevronRight className="h-4 w-4 text-muted-foreground/50 transition-transform group-hover:translate-x-0.5" />
+                      <ChevronRight className="text-muted-foreground/50 h-4 w-4 transition-transform group-hover:translate-x-0.5" />
                     </div>
                   </Link>
                 </li>

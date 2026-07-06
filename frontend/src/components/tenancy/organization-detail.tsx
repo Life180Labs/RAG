@@ -20,8 +20,16 @@ function statusVariant(status: string): 'default' | 'secondary' | 'outline' {
 }
 
 export function OrganizationDetail({ organizationId }: { organizationId: string }) {
-  const { data: organization, isLoading: isOrgLoading, isError: isOrgError } = useOrganization(organizationId);
-  const { data: workspaces, isLoading: isWorkspacesLoading, isError: isWorkspacesError } = useWorkspaces(organizationId);
+  const {
+    data: organization,
+    isLoading: isOrgLoading,
+    isError: isOrgError,
+  } = useOrganization(organizationId);
+  const {
+    data: workspaces,
+    isLoading: isWorkspacesLoading,
+    isError: isWorkspacesError,
+  } = useWorkspaces(organizationId);
   const [showCreateWorkspace, setShowCreateWorkspace] = useState(false);
   const [showInvite, setShowInvite] = useState(false);
 
@@ -53,13 +61,18 @@ export function OrganizationDetail({ organizationId }: { organizationId: string 
       <div className="flex items-start justify-between">
         <div>
           <div className="flex items-center gap-2">
-            <h1 className="text-xl font-semibold text-foreground">{organization.name}</h1>
+            <h1 className="text-foreground text-xl font-semibold">{organization.name}</h1>
             <Badge variant={statusVariant(organization.status)}>{organization.status}</Badge>
           </div>
-          <p className="mt-0.5 text-sm text-muted-foreground">/{organization.slug}</p>
+          <p className="text-muted-foreground mt-0.5 text-sm">/{organization.slug}</p>
         </div>
         <div className="flex gap-2">
-          <Button size="sm" variant="outline" className="gap-1.5" onClick={() => setShowInvite((v) => !v)}>
+          <Button
+            size="sm"
+            variant="outline"
+            className="gap-1.5"
+            onClick={() => setShowInvite((v) => !v)}
+          >
             <UserPlus className="h-3.5 w-3.5" />
             Invite member
           </Button>
@@ -94,7 +107,7 @@ export function OrganizationDetail({ organizationId }: { organizationId: string 
 
       <Card>
         <CardHeader className="pb-3">
-          <CardTitle className="text-sm font-medium text-muted-foreground uppercase tracking-wide">
+          <CardTitle className="text-muted-foreground text-sm font-medium tracking-wide uppercase">
             Workspaces
           </CardTitle>
         </CardHeader>
@@ -114,8 +127,11 @@ export function OrganizationDetail({ organizationId }: { organizationId: string 
           )}
 
           {workspaces && workspaces.length === 0 && (
-            <div className="flex flex-col items-center justify-center py-10 text-center" data-testid="workspaces-empty">
-              <p className="text-sm text-muted-foreground">No workspaces yet.</p>
+            <div
+              className="flex flex-col items-center justify-center py-10 text-center"
+              data-testid="workspaces-empty"
+            >
+              <p className="text-muted-foreground text-sm">No workspaces yet.</p>
               <Button
                 size="sm"
                 variant="outline"
@@ -129,22 +145,22 @@ export function OrganizationDetail({ organizationId }: { organizationId: string 
           )}
 
           {workspaces && workspaces.length > 0 && (
-            <ul className="divide-y divide-border" data-testid="workspaces-list">
+            <ul className="divide-border divide-y" data-testid="workspaces-list">
               {workspaces.map((workspace) => (
                 <li key={workspace.id}>
                   <Link
                     href={`/organizations/${organizationId}/workspaces/${workspace.id}`}
-                    className="group flex items-center justify-between px-5 py-3.5 transition-colors hover:bg-muted/20"
+                    className="group hover:bg-muted/20 flex items-center justify-between px-5 py-3.5 transition-colors"
                   >
                     <div className="min-w-0">
-                      <p className="truncate text-sm font-medium text-foreground group-hover:text-primary transition-colors">
+                      <p className="text-foreground group-hover:text-primary truncate text-sm font-medium transition-colors">
                         {workspace.name}
                       </p>
-                      <p className="text-xs text-muted-foreground">/{workspace.slug}</p>
+                      <p className="text-muted-foreground text-xs">/{workspace.slug}</p>
                     </div>
                     <div className="ml-4 flex shrink-0 items-center gap-2">
                       <Badge variant={statusVariant(workspace.status)}>{workspace.status}</Badge>
-                      <ChevronRight className="h-4 w-4 text-muted-foreground/50 transition-transform group-hover:translate-x-0.5" />
+                      <ChevronRight className="text-muted-foreground/50 h-4 w-4 transition-transform group-hover:translate-x-0.5" />
                     </div>
                   </Link>
                 </li>

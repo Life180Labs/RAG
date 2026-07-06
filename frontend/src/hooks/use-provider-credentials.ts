@@ -6,7 +6,8 @@ import type { ProviderType } from '@/types/provider-credential';
 export function useProviderCredentials(organizationId: string) {
   return useQuery({
     queryKey: ['organizations', organizationId, 'provider-credentials'],
-    queryFn: ({ signal }) => providerCredentialService.listProviderCredentials(organizationId, signal),
+    queryFn: ({ signal }) =>
+      providerCredentialService.listProviderCredentials(organizationId, signal),
     select: (response) => response.data,
     enabled: Boolean(organizationId),
   });

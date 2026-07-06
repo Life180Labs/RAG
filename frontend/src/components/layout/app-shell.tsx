@@ -14,14 +14,14 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 
   if (isAuthRoute) {
     return (
-      <div className="flex min-h-screen flex-col items-center justify-center bg-background px-6 py-12">
+      <div className="bg-background flex min-h-screen flex-col items-center justify-center px-6 py-12">
         <div className="mb-10 flex flex-col items-center gap-3">
-          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-primary">
-            <Cpu className="h-5 w-5 text-primary-foreground" />
+          <div className="bg-primary flex h-10 w-10 items-center justify-center rounded-xl">
+            <Cpu className="text-primary-foreground h-5 w-5" />
           </div>
           <div className="text-center">
-            <p className="text-sm font-semibold text-foreground">RAG Studio</p>
-            <p className="text-xs text-muted-foreground">Enterprise Pipeline Platform</p>
+            <p className="text-foreground text-sm font-semibold">RAG Studio</p>
+            <p className="text-muted-foreground text-xs">Enterprise Pipeline Platform</p>
           </div>
         </div>
         {children}
@@ -30,11 +30,11 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   }
 
   return (
-    <div className="flex h-screen overflow-hidden bg-background">
+    <div className="bg-background flex h-screen overflow-hidden">
       <Sidebar />
       <div className="flex flex-1 flex-col overflow-hidden">
         <TopBar />
-        <main className="scrollbar-thin flex-1 overflow-y-auto p-6">{children}</main>
+        <main className="flex-1 scrollbar-thin overflow-y-auto p-6">{children}</main>
       </div>
     </div>
   );

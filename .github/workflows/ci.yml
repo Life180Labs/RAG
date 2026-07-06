@@ -43,9 +43,33 @@ jobs:
     env:
       DATABASE_URL: postgresql+asyncpg://rag:rag@localhost:5432/rag
       REDIS_URL: redis://localhost:6379/0
+      MINIO_ENDPOINT: localhost:9002
+      MINIO_ACCESS_KEY: ragadmin
+      MINIO_SECRET_KEY: ragadminsecret
       DEBUG: "true"
     steps:
       - uses: actions/checkout@v4
+
+      # MinIO can't be a GH Actions `services:` entry: the official image's
+      # ENTRYPOINT needs `server /data` as an argument or it just prints
+      # usage and exits, and `services:` has no way to set a container's
+      # command/args (only `options`, which maps to `docker create` flags,
+      # not the trailing command) — a well-known upstream limitation
+      # (minio/minio#21506). Running it as a plain `docker run` step is the
+      # standard workaround.
+      - name: Start MinIO
+        run: |
+          docker run -d --name minio -p 9002:9000 \
+            -e MINIO_ROOT_USER=ragadmin -e MINIO_ROOT_PASSWORD=ragadminsecret \
+            minio/minio server /data
+
+      # docs/06-rule.md / CLAUDE.md: "tests run against real infrastructure,
+      # never mocked" — the LLM Gateway tests exercise ollama for real
+      # (it's always in the fallback chain and needs no API key), so it
+      # needs to actually be running here too. Unlike MinIO, ollama/ollama's
+      # default CMD (`ollama serve`) starts the server with no extra args.
+      - name: Start Ollama
+        run: docker run -d --name ollama -p 11434:11434 ollama/ollama
 
       - uses: actions/setup-python@v5
         with:
@@ -55,6 +79,49 @@ jobs:
 
       - name: Install dependencies
         run: pip install -e ".[dev]"
+
+      - name: Wait for MinIO + create bucket
+        # backend/tests/conftest.py's session-scoped autouse fixture also
+        # calls ensure_bucket_exists, but doing it here first fails fast
+        # with a clear error if MinIO never comes up, instead of every
+        # single test erroring out with a connection-refused traceback.
+        run: |
+          python -c "
+          import time
+          from minio import Minio
+          client = Minio('localhost:9002', access_key='ragadmin', secret_key='ragadminsecret', secure=False)
+          for _ in range(30):
+              try:
+                  if not client.bucket_exists('rag-documents'):
+                      client.make_bucket('rag-documents')
+                  break
+              except Exception:
+                  time.sleep(1)
+          else:
+              raise SystemExit('MinIO never became ready')
+          "
+
+      - name: Wait for Ollama + pull model
+        # deepseek-r1:1.5b is the model the LLM Gateway tests request —
+        # small enough (~1.1GB) to pull fresh in CI in a reasonable time.
+        run: |
+          python -c "
+          import json, time, urllib.request
+          for _ in range(30):
+              try:
+                  urllib.request.urlopen('http://localhost:11434/api/tags', timeout=5)
+                  break
+              except Exception:
+                  time.sleep(1)
+          else:
+              raise SystemExit('Ollama never became ready')
+          req = urllib.request.Request(
+              'http://localhost:11434/api/pull',
+              data=json.dumps({'name': 'deepseek-r1:1.5b'}).encode(),
+              method='POST',
+          )
+          urllib.request.urlopen(req, timeout=300).read()
+          "
 
       - name: Lint (ruff)
         run: ruff check app tests
@@ -68,6 +135,12 @@ jobs:
 
       - name: Unit + integration tests
         run: pytest --cov=app --cov-report=term-missing
+
+      - name: Dependency vulnerability scan (pip-audit)
+        # Non-blocking for now (same as mypy above) until an initial pass has
+        # reviewed and triaged whatever it currently reports.
+        run: pip-audit
+        continue-on-error: true
 
   worker:
     name: Worker (lint + test)
@@ -111,8 +184,19 @@ jobs:
       REDIS_URL: redis://localhost:6379/0
       QDRANT_URL: http://localhost:6333
       CHROMA_URL: http://localhost:8000
+      MINIO_ENDPOINT: localhost:9002
+      MINIO_ACCESS_KEY: ragadmin
+      MINIO_SECRET_KEY: ragadminsecret
     steps:
       - uses: actions/checkout@v4
+
+      # See the backend job's "Start MinIO" step for why this can't be a
+      # `services:` entry (minio/minio#21506).
+      - name: Start MinIO
+        run: |
+          docker run -d --name minio -p 9002:9000 \
+            -e MINIO_ROOT_USER=ragadmin -e MINIO_ROOT_PASSWORD=ragadminsecret \
+            minio/minio server /data
 
       - uses: actions/setup-python@v5
         with:
@@ -127,6 +211,27 @@ jobs:
         working-directory: backend
         run: pip install -e ".[dev]"
 
+      - name: Wait for MinIO + create bucket
+        # Worker's own tests have no bucket-creation fixture of their own
+        # (unlike backend's) — they assume the bucket already exists, true
+        # in local dev where backend creates it in the same shared MinIO,
+        # but this job gets its own isolated MinIO instance.
+        run: |
+          python -c "
+          import time
+          from minio import Minio
+          client = Minio('localhost:9002', access_key='ragadmin', secret_key='ragadminsecret', secure=False)
+          for _ in range(30):
+              try:
+                  if not client.bucket_exists('rag-documents'):
+                      client.make_bucket('rag-documents')
+                  break
+              except Exception:
+                  time.sleep(1)
+          else:
+              raise SystemExit('MinIO never became ready')
+          "
+
       - name: Apply migrations
         working-directory: backend
         env:
@@ -138,6 +243,11 @@ jobs:
 
       - name: Unit tests
         run: pytest
+
+      - name: Dependency vulnerability scan (pip-audit)
+        # Non-blocking for now, same reasoning as the backend job's step.
+        run: pip-audit
+        continue-on-error: true
 
   frontend:
     name: Frontend (lint + typecheck + build)
@@ -168,6 +278,11 @@ jobs:
 
       - name: Build
         run: npm run build
+
+      - name: Dependency vulnerability scan (npm audit)
+        # Non-blocking for now, same reasoning as the backend/worker pip-audit steps.
+        run: npm audit --audit-level=high
+        continue-on-error: true
 
   build-validation:
     name: Docker build validation
