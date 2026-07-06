@@ -26,6 +26,8 @@ alembic upgrade head          # apply migrations
 alembic revision --autogenerate -m "..."   # new migration
 pytest --cov=app --cov-report=term-missing # full suite
 pytest tests/test_vector_indexes.py -k test_name  # single test
+pip-audit                     # dependency vulnerability scan (also runs in CI, non-blocking)
+pip-compile pyproject.toml -o requirements.lock --resolver=backtracking  # regenerate the transitive-dep lockfile after changing dependencies
 ```
 
 **Worker** (`worker/`, Celery + sync psycopg3 driver):
@@ -34,6 +36,8 @@ pip install -e ".[dev]"
 ruff check .
 pytest
 pytest tests/test_build_index.py -k test_name
+pip-audit                     # dependency vulnerability scan (also runs in CI, non-blocking)
+pip-compile pyproject.toml -o requirements.lock --resolver=backtracking  # regenerate the transitive-dep lockfile after changing dependencies
 ```
 Worker tests hit the real dockerized Postgres/Redis/Qdrant/Chroma stack — **always run `docker compose -f docker/docker-compose.yml --env-file .env stop worker` before running worker tests or ad hoc scripts locally**, then `start worker` afterward. Otherwise the live worker container and your local process both consume the same Celery task from Redis, racing to insert the same row and producing spurious `ForeignKeyViolation` errors that look like ordering bugs but aren't.
 

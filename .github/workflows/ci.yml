@@ -69,6 +69,12 @@ jobs:
       - name: Unit + integration tests
         run: pytest --cov=app --cov-report=term-missing
 
+      - name: Dependency vulnerability scan (pip-audit)
+        # Non-blocking for now (same as mypy above) until an initial pass has
+        # reviewed and triaged whatever it currently reports.
+        run: pip-audit
+        continue-on-error: true
+
   worker:
     name: Worker (lint + test)
     runs-on: ubuntu-latest
@@ -139,6 +145,11 @@ jobs:
       - name: Unit tests
         run: pytest
 
+      - name: Dependency vulnerability scan (pip-audit)
+        # Non-blocking for now, same reasoning as the backend job's step.
+        run: pip-audit
+        continue-on-error: true
+
   frontend:
     name: Frontend (lint + typecheck + build)
     runs-on: ubuntu-latest
@@ -168,6 +179,11 @@ jobs:
 
       - name: Build
         run: npm run build
+
+      - name: Dependency vulnerability scan (npm audit)
+        # Non-blocking for now, same reasoning as the backend/worker pip-audit steps.
+        run: npm audit --audit-level=high
+        continue-on-error: true
 
   build-validation:
     name: Docker build validation

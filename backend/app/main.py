@@ -18,6 +18,7 @@ from app.core.logging import configure_logging, get_logger
 from app.core.storage import ensure_bucket_exists, get_storage_client
 from app.middleware.metrics import MetricsMiddleware
 from app.middleware.request_context import RequestContextMiddleware
+from app.middleware.security_headers import SecurityHeadersMiddleware
 
 settings = get_settings()
 configure_logging(settings.log_level)
@@ -53,6 +54,7 @@ def create_app() -> FastAPI:
     )
     app.add_middleware(MetricsMiddleware)
     app.add_middleware(RequestContextMiddleware)
+    app.add_middleware(SecurityHeadersMiddleware)
 
     register_exception_handlers(app)
 
