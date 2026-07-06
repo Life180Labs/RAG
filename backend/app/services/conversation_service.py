@@ -51,6 +51,7 @@ from app.repositories.conversation_repository import (
     ConversationSummaryRepository,
     MessageRepository,
 )
+from app.repositories.document_repository import DocumentRepository
 from app.repositories.prompt_template_repository import PromptTemplateRepository
 from app.schemas.conversation import CreateConversationRequest, SendMessageRequest
 from app.schemas.llm import CreateCompletionRequest
@@ -58,6 +59,7 @@ from app.schemas.prompt import CreatePromptRequest
 from app.schemas.retrieval import CreateRetrievalRequest
 from app.services.llm_service import LLMService
 from app.services.prompt_service import PromptService
+from app.services.provider_credential_service import ProviderCredentialService
 from app.services.retrieval_service import RetrievalService
 
 DEFAULT_SYSTEM_PROMPT = (
@@ -81,6 +83,8 @@ class ConversationService:
         prompt_service: PromptService,
         llm_service: LLMService,
         audit_log_repository: AuditLogRepository,
+        document_repository: DocumentRepository,
+        provider_credential_service: ProviderCredentialService,
     ):
         self.conversations = conversation_repository
         self.messages = message_repository
@@ -91,6 +95,8 @@ class ConversationService:
         self.prompts = prompt_service
         self.llm = llm_service
         self.audit_logs = audit_log_repository
+        self.documents = document_repository
+        self.provider_credentials = provider_credential_service
         # Every repository above shares one AsyncSession (they're all built from the
         # same request-scoped `get_db`) — reused here for the documented mid-request
         # commit, not a second connection.
@@ -222,7 +228,11 @@ class ConversationService:
         )
 
         gateway = LLMGateway()
-        standalone_query = await condense_query(gateway, history_text, payload.content)
+        organization_id = await self.documents.get_organization_id(document.id)
+        credential_overrides = await self.provider_credentials.get_llm_overrides(organization_id)
+        standalone_query = await condense_query(
+            gateway, history_text, payload.content, credential_overrides
+        )
 
         # Semantic Cache (docs/02-architecture.md section 99, Phase 17):
         # embed the standalone query and check for a near-duplicate past
@@ -327,12 +337,17 @@ class ConversationService:
                 answer_text=assistant_content,
             )
 
-        await self._maybe_summarize(conversation, gateway)
+        await self._maybe_summarize(conversation, gateway, credential_overrides)
         await self._record_audit(actor_id, "conversation.message", conversation.id)
 
         return user_message, assistant_message
 
-    async def _maybe_summarize(self, conversation: Conversation, gateway: LLMGateway) -> None:
+    async def _maybe_summarize(
+        self,
+        conversation: Conversation,
+        gateway: LLMGateway,
+        credential_overrides: dict[str, str] | None = None,
+    ) -> None:
         summary = await self.summaries.get_latest(conversation.id)
         unsummarized = await self.messages.list_by_conversation(
             conversation.id,
@@ -348,7 +363,9 @@ class ConversationService:
             for m in unsummarized
         )
         try:
-            summary_text = await summarize_messages(gateway, history_prefix + transcript)
+            summary_text = await summarize_messages(
+                gateway, history_prefix + transcript, credential_overrides
+            )
         except Exception:  # noqa: BLE001 - skip this turn's summarization, try again later
             return
 

@@ -27,7 +27,12 @@ _SYSTEM_PROMPT = (
 )
 
 
-async def condense_query(gateway: LLMGateway, history_text: str, new_query: str) -> str:
+async def condense_query(
+    gateway: LLMGateway,
+    history_text: str,
+    new_query: str,
+    credential_overrides: dict[str, str] | None = None,
+) -> str:
     if not history_text.strip():
         return new_query
 
@@ -43,7 +48,10 @@ async def condense_query(gateway: LLMGateway, history_text: str, new_query: str)
     ]
     try:
         result, _, _, _ = await gateway.generate(
-            messages, routing_hint="fast", options=ProviderRequestOptions(temperature=0.0)
+            messages,
+            routing_hint="fast",
+            options=ProviderRequestOptions(temperature=0.0),
+            credential_overrides=credential_overrides,
         )
     except Exception as exc:  # noqa: BLE001 - any gateway failure degrades to the raw query
         logger.warning("query_condensation_failed", error=str(exc))

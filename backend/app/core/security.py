@@ -7,14 +7,29 @@ Centralized here so no service ever hand-rolls token or hash logic
 import uuid
 from datetime import UTC, datetime, timedelta
 from enum import StrEnum
+from functools import lru_cache
 from typing import Any
 
+from cryptography.fernet import Fernet
 from jose import JWTError, jwt
 from passlib.context import CryptContext
 
 from app.core.config import get_settings
 
 _pwd_context = CryptContext(schemes=["argon2"], deprecated="auto")
+
+
+@lru_cache
+def _fernet() -> Fernet:
+    return Fernet(get_settings().credential_encryption_key.encode())
+
+
+def encrypt_credential(plain_value: str) -> str:
+    return _fernet().encrypt(plain_value.encode()).decode()
+
+
+def decrypt_credential(encrypted_value: str) -> str:
+    return _fernet().decrypt(encrypted_value.encode()).decode()
 
 
 class TokenType(StrEnum):

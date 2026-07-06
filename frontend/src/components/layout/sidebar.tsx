@@ -11,6 +11,7 @@ import {
   FolderKanban,
   LayoutDashboard,
   LogOut,
+  Settings,
 } from 'lucide-react';
 
 import { cn } from '@/lib/utils';
@@ -136,6 +137,13 @@ export function Sidebar() {
                   label="Organization"
                   icon={<Building2 className="h-3.5 w-3.5" />}
                   active={pathname === orgBase}
+                  indent
+                />
+                <NavItem
+                  href={`${orgBase}/settings`}
+                  label="Settings"
+                  icon={<Settings className="h-3.5 w-3.5" />}
+                  active={pathname === `${orgBase}/settings`}
                   indent
                 />
                 {workspaceId && wsBase && (

@@ -4,9 +4,11 @@ from fastapi import Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.api.deps import get_audit_log_repository
+from app.api.document_deps import get_document_repository
 from app.api.llm_deps import get_llm_service
 from app.api.prompt_deps import get_prompt_service, get_prompt_template_repository
 from app.api.retrieval_deps import get_retrieval_service
+from app.api.tenancy_deps import get_provider_credential_service
 from app.db.session import get_db
 from app.repositories.audit_log_repository import AuditLogRepository
 from app.repositories.conversation_repository import (
@@ -15,11 +17,13 @@ from app.repositories.conversation_repository import (
     ConversationSummaryRepository,
     MessageRepository,
 )
+from app.repositories.document_repository import DocumentRepository
 from app.repositories.prompt_template_repository import PromptTemplateRepository
 from app.services.conversation_service import ConversationService
 from app.services.llm_service import LLMService
 from app.services.memory_service import MemoryService
 from app.services.prompt_service import PromptService
+from app.services.provider_credential_service import ProviderCredentialService
 from app.services.retrieval_service import RetrievalService
 
 
@@ -59,6 +63,10 @@ def get_conversation_service(
     prompt_service: PromptService = Depends(get_prompt_service),
     llm_service: LLMService = Depends(get_llm_service),
     audit_log_repository: AuditLogRepository = Depends(get_audit_log_repository),
+    document_repository: DocumentRepository = Depends(get_document_repository),
+    provider_credential_service: ProviderCredentialService = Depends(
+        get_provider_credential_service
+    ),
 ) -> ConversationService:
     return ConversationService(
         conversation_repository,
@@ -70,6 +78,8 @@ def get_conversation_service(
         prompt_service,
         llm_service,
         audit_log_repository,
+        document_repository,
+        provider_credential_service,
     )
 
 

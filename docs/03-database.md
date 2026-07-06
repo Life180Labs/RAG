@@ -1121,9 +1121,41 @@ audit coverage (permission changes, uploads, deletes) expands as those features 
 
 # 28. API Keys Schema
 
-**Pending — not yet scheduled in `05-task.md`.** Phase 2 as scoped implemented the
-organization/workspace/project hierarchy, membership, and invitations, but did not include API
-key management.
+Implemented in `backend/app/models/provider_credential.py`, migration
+`0019_add_provider_credentials`. One table, `provider_credentials`, holding per-organization
+overrides for the platform's LLM/embedding/reranking/vector-index provider keys — added
+out-of-plan (not part of the original 25-phase sequence) in response to a real deployment issue:
+embeddings failed in production because `OPENAI_API_KEY` was only ever configurable via a
+platform-wide env var, with no way for an individual organization to bring its own key.
+
+```
+provider_credentials
+  id               UUID PK
+  organization_id  UUID FK -> organizations.id, ON DELETE CASCADE, indexed
+  provider         varchar(50)          -- openai|anthropic|gemini|groq|openrouter|voyage|jina|cohere|pinecone
+  encrypted_key    text                 -- Fernet ciphertext, never returned via the API
+  last_four        varchar(4)           -- for display ("sk-...ab12") without decrypting
+  created_by       UUID, nullable
+  updated_by       UUID, nullable
+  created_at       timestamptz
+  updated_at       timestamptz
+  UNIQUE (organization_id, provider)
+```
+
+`provider` is a plain varchar, not an enum — matching the existing convention on
+`embeddings.provider`/`vector_indexes.provider` — so a 10th provider never needs an enum
+migration. `ollama` is deliberately excluded from the allowed set: it's a self-hosted base URL,
+not a secret key, and doesn't fit this table's shape. Encryption uses a single symmetric Fernet
+key (`CREDENTIAL_ENCRYPTION_KEY`), configured identically on both the backend (encrypts on
+write, decrypts for internal use in the LLM Gateway) and the worker (decrypts independently for
+embedding/reranking/vector-index provider construction) — the same "separate deployables, shared
+secret" precedent `DATABASE_URL`/`REDIS_URL` already establish, never resolved by one service
+calling the other. Upsert semantics on `(organization_id, provider)` — re-submitting a key for a
+provider the org already configured replaces it in place, the same regeneration-reuses-id pattern
+embedding versions and chunk sets already use, rather than accumulating duplicate rows. See
+docs/04-api-spec.md section 25 for the API and docs/02-architecture.md for how the override is
+resolved into the LLM Gateway and worker provider factories, falling back to the platform-wide
+env-var default when an organization hasn't configured a given provider.
 
 ---
 

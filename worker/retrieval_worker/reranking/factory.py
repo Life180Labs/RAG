@@ -18,13 +18,13 @@ DEFAULT_PROVIDER = "cross_encoder"
 _LOCAL_PROVIDERS = set(LOCAL_MODEL_NAMES)
 
 
-def get_provider(provider: str) -> RerankProvider:
+def get_provider(provider: str, api_key_override: str | None = None) -> RerankProvider:
     if provider in _LOCAL_PROVIDERS:
         return LocalRerankProvider(provider)
     if provider == "flashrank":
         return FlashRankProvider()
     if provider == "cohere":
-        return CohereRerankProvider()
+        return CohereRerankProvider(api_key_override=api_key_override)
     if provider == "jina":
-        return JinaRerankProvider()
+        return JinaRerankProvider(api_key_override=api_key_override)
     raise ValueError(f"Unknown rerank provider '{provider}'.")

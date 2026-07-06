@@ -43,4 +43,10 @@ COPY --from=builder /build/scheduler ./scheduler
 
 USER appuser
 
-CMD ["celery", "-A", "common.celery_app", "worker", "--loglevel=info"]
+# Celery's default concurrency is multiprocessing.cpu_count(), which reads
+# the host machine's core count rather than the container's actual memory
+# allocation (Railway logs showed 48 fork-pool workers on a memory-limited
+# container) — each fork can load its own copy of an ONNX embedding/rerank
+# model, so the pool blows past the memory limit and gets SIGKILLed mid-task.
+# Pin it to match worker/Dockerfile.dev's already-correct local value.
+CMD ["celery", "-A", "common.celery_app", "worker", "--loglevel=info", "--concurrency=2"]

@@ -21,12 +21,19 @@ _SYSTEM_PROMPT = (
 )
 
 
-async def summarize_messages(gateway: LLMGateway, messages_text: str) -> str:
+async def summarize_messages(
+    gateway: LLMGateway,
+    messages_text: str,
+    credential_overrides: dict[str, str] | None = None,
+) -> str:
     messages = [
         LLMMessage(role="system", content=_SYSTEM_PROMPT),
         LLMMessage(role="user", content=messages_text),
     ]
     result, _, _, _ = await gateway.generate(
-        messages, routing_hint="fast", options=ProviderRequestOptions(temperature=0.0)
+        messages,
+        routing_hint="fast",
+        options=ProviderRequestOptions(temperature=0.0),
+        credential_overrides=credential_overrides,
     )
     return result.text.strip()

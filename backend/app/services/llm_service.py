@@ -40,9 +40,11 @@ from app.models.audit_log import AuditLog
 from app.models.llm_request import LLMRequest, LLMRequestStatus
 from app.models.prompt import PromptStatus
 from app.repositories.audit_log_repository import AuditLogRepository
+from app.repositories.document_repository import DocumentRepository
 from app.repositories.llm_request_repository import LLMRequestRepository
 from app.schemas.llm import CreateCompletionRequest
 from app.services.prompt_service import PromptService
+from app.services.provider_credential_service import ProviderCredentialService
 
 
 class LLMService:
@@ -51,11 +53,15 @@ class LLMService:
         llm_request_repository: LLMRequestRepository,
         prompt_service: PromptService,
         audit_log_repository: AuditLogRepository,
+        document_repository: DocumentRepository,
+        provider_credential_service: ProviderCredentialService,
         gateway: LLMGateway | None = None,
     ):
         self.llm_requests = llm_request_repository
         self.prompts = prompt_service
         self.audit_logs = audit_log_repository
+        self.documents = document_repository
+        self.provider_credentials = provider_credential_service
         self.gateway = gateway or LLMGateway()
 
     async def get_ready_prompt(
@@ -137,6 +143,8 @@ class LLMService:
         messages = [LLMMessage(role="user", content=prompt.rendered_prompt)]
         options = ProviderRequestOptions(json_mode=payload.json_mode)
         started_at = time.monotonic()
+        organization_id = await self.documents.get_organization_id(document_id)
+        credential_overrides = await self.provider_credentials.get_llm_overrides(organization_id)
         try:
             result, provider_used, model_used, attempts = await self.gateway.generate(
                 messages,
@@ -144,6 +152,7 @@ class LLMService:
                 provider=payload.provider,
                 model=payload.model,
                 options=options,
+                credential_overrides=credential_overrides,
             )
         except NoMatchingModelError as exc:
             raise ConflictError(str(exc), code="NO_MATCHING_MODEL") from exc
@@ -163,7 +172,7 @@ class LLMService:
             return llm_request
 
         latency_ms = int((time.monotonic() - started_at) * 1000)
-        cost = get_provider(provider_used).cost_estimate(
+        cost = get_provider(provider_used, credential_overrides.get(provider_used)).cost_estimate(
             result.input_tokens, result.output_tokens, model_used
         )
         llm_request.provider = provider_used

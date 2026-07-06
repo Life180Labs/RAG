@@ -20,8 +20,10 @@ class CohereRerankProvider(RerankProvider):
     provider_name = "cohere"
     endpoint = "https://api.cohere.com/v1/rerank"
 
-    def __init__(self, model_name: str = "rerank-english-v3.0") -> None:
-        api_key = get_worker_settings().cohere_api_key
+    def __init__(
+        self, model_name: str = "rerank-english-v3.0", api_key_override: str | None = None
+    ) -> None:
+        api_key = api_key_override or get_worker_settings().cohere_api_key
         if not api_key:
             raise ProviderNotConfiguredError("COHERE_API_KEY is not configured.")
         self.model_name = model_name
@@ -50,8 +52,12 @@ class JinaRerankProvider(RerankProvider):
     provider_name = "jina"
     endpoint = "https://api.jina.ai/v1/rerank"
 
-    def __init__(self, model_name: str = "jina-reranker-v2-base-multilingual") -> None:
-        api_key = get_worker_settings().jina_api_key
+    def __init__(
+        self,
+        model_name: str = "jina-reranker-v2-base-multilingual",
+        api_key_override: str | None = None,
+    ) -> None:
+        api_key = api_key_override or get_worker_settings().jina_api_key
         if not api_key:
             raise ProviderNotConfiguredError("JINA_API_KEY is not configured.")
         self.model_name = model_name

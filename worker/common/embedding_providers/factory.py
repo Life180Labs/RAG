@@ -43,7 +43,9 @@ def default_model(provider: str) -> str:
     return DEFAULT_MODELS[provider]
 
 
-def get_provider(provider: str, model: str | None = None) -> EmbeddingProvider:
+def get_provider(
+    provider: str, model: str | None = None, api_key_override: str | None = None
+) -> EmbeddingProvider:
     resolved_model = model or default_model(provider)
 
     if provider in _LOCAL_PROVIDERS:
@@ -51,10 +53,10 @@ def get_provider(provider: str, model: str | None = None) -> EmbeddingProvider:
 
     settings = get_worker_settings()
     if provider == "openai":
-        return OpenAIEmbeddingProvider(resolved_model, settings.openai_api_key)
+        return OpenAIEmbeddingProvider(resolved_model, api_key_override or settings.openai_api_key)
     if provider == "voyage":
-        return VoyageEmbeddingProvider(resolved_model, settings.voyage_api_key)
+        return VoyageEmbeddingProvider(resolved_model, api_key_override or settings.voyage_api_key)
     if provider == "jina":
-        return JinaEmbeddingProvider(resolved_model, settings.jina_api_key)
+        return JinaEmbeddingProvider(resolved_model, api_key_override or settings.jina_api_key)
 
     raise ValueError(f"Unknown embedding provider '{provider}'.")

@@ -21,6 +21,7 @@ from app.models import (  # noqa: F401
     organization,
     project,
     prompt,
+    provider_credential,
     repository,
     retrieval,
     session,

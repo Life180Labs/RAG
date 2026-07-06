@@ -10,19 +10,21 @@ from app.core.llm.providers.openrouter import OpenRouterProvider
 PROVIDER_NAMES = ["openai", "anthropic", "gemini", "groq", "openrouter", "ollama"]
 
 
-def get_provider(name: str) -> LLMProvider:
+def get_provider(name: str, api_key_override: str | None = None) -> LLMProvider:
     settings = get_settings()
     if name == "openai":
-        return OpenAIProvider(settings.openai_api_key)
+        return OpenAIProvider(api_key_override or settings.openai_api_key)
     if name == "anthropic":
-        return AnthropicProvider(settings.anthropic_api_key)
+        return AnthropicProvider(api_key_override or settings.anthropic_api_key)
     if name == "gemini":
-        return GeminiProvider(settings.gemini_api_key)
+        return GeminiProvider(api_key_override or settings.gemini_api_key)
     if name == "groq":
-        return GroqProvider(settings.groq_api_key)
+        return GroqProvider(api_key_override or settings.groq_api_key)
     if name == "openrouter":
-        return OpenRouterProvider(settings.openrouter_api_key)
+        return OpenRouterProvider(api_key_override or settings.openrouter_api_key)
     if name == "ollama":
+        # Not key-gated — a org override would be a base_url, not a secret
+        # key, and isn't part of the provider_credentials feature.
         return OllamaProvider(settings.ollama_base_url)
     raise ValueError(f"Unknown LLM provider: {name!r}")
 

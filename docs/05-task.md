@@ -3538,3 +3538,21 @@ Acceptance Criteria
 
 AI Eval ≥ 99
 
+---
+
+# Out-of-plan additions (no phase number — outside the 25-phase sequence above)
+
+These were built in response to real operational needs discovered after Phase 17, not scheduled
+phases from the original plan. Tracked here rather than inserted as a new numbered phase, since
+Phase 18-25 above are already reserved for specific future work (Evaluation Engine, Benchmarking,
+Analytics, Production Deployment) this doc doesn't want to renumber.
+
+- [x] Railway deployment (Postgres/pgvector, Redis, MinIO, Qdrant, Chroma, backend, worker,
+  frontend) — see docs/04-api-spec.md / docs/02-architecture.md for no schema changes; this was
+  infra-only (Dockerfile fixes, service wiring), no API/DB changes.
+- [x] Per-organization provider API key settings (`provider_credentials` table, encrypted at
+  rest) — added after a production embeddings failure traced to `OPENAI_API_KEY` only being
+  configurable via a platform-wide env var, with no per-organization override. See
+  docs/03-database.md section 28, docs/04-api-spec.md section 25, docs/02-architecture.md
+  section 82a.
+

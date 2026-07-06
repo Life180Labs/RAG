@@ -26,8 +26,10 @@ from datetime import UTC, datetime
 from sqlalchemy import text
 
 from common.celery_app import celery_app
+from common.credentials import get_org_credential
 from common.db import SessionLocal
 from common.logging import get_logger
+from common.org_resolution import resolve_organization_id
 from index_worker.providers.base import (
     ProviderNotConfiguredError,
     UnsupportedIndexTypeError,
@@ -214,8 +216,15 @@ def build_index(
             for row in rows
         ]
 
+        organization_id = resolve_organization_id(session, document_id)
+        api_key_override = (
+            get_org_credential(session, organization_id, resolved_provider)
+            if organization_id
+            else None
+        )
+
         try:
-            provider_instance = get_provider(resolved_provider, session)
+            provider_instance = get_provider(resolved_provider, session, api_key_override)
         except ProviderNotConfiguredError as exc:
             message = str(exc)
             _fail(message)
@@ -323,7 +332,7 @@ def delete_index(vector_index_id: str) -> dict:
     with SessionLocal() as session:
         row = session.execute(
             text(
-                "SELECT provider, namespace FROM vector_indexes WHERE id = :id"
+                "SELECT provider, namespace, document_id FROM vector_indexes WHERE id = :id"
             ),
             {"id": vector_index_id},
         ).first()
@@ -331,7 +340,12 @@ def delete_index(vector_index_id: str) -> dict:
             logger.warning("delete_index_missing", vector_index_id=vector_index_id)
             return {"status": "skipped", "reason": "vector_index_not_found"}
 
-        provider_instance = get_provider(row.provider, session)
+        organization_id = resolve_organization_id(session, str(row.document_id))
+        api_key_override = (
+            get_org_credential(session, organization_id, row.provider) if organization_id else None
+        )
+
+        provider_instance = get_provider(row.provider, session, api_key_override)
         provider_instance.delete(row.namespace)
 
         session.execute(

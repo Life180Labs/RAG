@@ -608,7 +608,24 @@ rebuilt (see `docs/03-database.md`'s Semantic Cache Schema section for all three
 
 # 25. Settings APIs
 
-**Pending — not yet scheduled in `05-task.md`.**
+Implemented (`backend/app/api/v1/provider_credentials.py`): per-organization API keys for LLM
+(`openai`, `anthropic`, `gemini`, `groq`, `openrouter`), embedding/reranking (`voyage`, `jina`,
+`cohere`), and vector-index (`pinecone`) providers, encrypted at rest (Fernet,
+`CREDENTIAL_ENCRYPTION_KEY`) and stored in `provider_credentials`. All three routes require
+organization ADMIN+ (`require_organization_role(MemberRole.ADMIN)`), same minimum as invitations.
+
+| Method | Path | Auth | Description |
+|---|---|---|---|
+| POST | `/api/v1/organizations/{organization_id}/provider-credentials` | Org ADMIN+ | Create or update (upsert on `provider`) a credential; body `{"provider": "openai", "api_key": "..."}` |
+| GET | `/api/v1/organizations/{organization_id}/provider-credentials` | Org ADMIN+ | List configured providers for the org — returns `last_four` only, never the raw key |
+| DELETE | `/api/v1/organizations/{organization_id}/provider-credentials/{credential_id}` | Org ADMIN+ | Delete a credential |
+
+The raw key is never echoed back in any response, including immediately after creation — only
+`last_four` is stored/returned for display (e.g. `sk-...ab12`). When an org hasn't configured a
+given provider, requests fall back to that provider's platform-wide env-var default (unchanged
+prior behavior); an org-configured key always takes precedence when present. See
+docs/02-architecture.md's LLM Gateway and worker provider-factory sections for how the override is
+resolved per-request.
 
 # 26. Admin APIs
 
